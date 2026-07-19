@@ -10,4 +10,5 @@ start: 1:30 PM July 18th
 FastAPI: chosen based on familiarity, built in async (useful for I/O bound app), pydantic integration and the fact the recruiter mentioned it in a previous conversation.
 Postgres: chosen based on familiarity, rdms support if the app ever needs multitenancy,rbac or more complex ui to support github/jira workflows as well as pgvector support.
 HTMX: chosen due to my complete lack of experience with it, for its educational value.
-9. 
+9. Scaffolded repository. decided on 3 layer Fastapi with route, business logic and data access (repository) kept separately.
+10.

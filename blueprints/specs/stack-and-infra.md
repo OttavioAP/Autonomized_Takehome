@@ -40,6 +40,14 @@ Token streaming via Server-Sent Events, consumed client-side via the `htmx-ext-s
 
 Basic structural validation on both the AI input and output boundary — reject malformed input, reject malformed output (e.g. invalid JSON) — via Pydantic models. Does not include content moderation or prompt-injection defenses (NMVP-NFR-5, non-MVP).
 
+## Code quality (pre-commit hooks)
+
+- **Linting/formatting**: ruff, configured in `pyproject.toml` — covers both lint and format (replaces flake8/black/isort). Runs over all Python source.
+- **Type checking**: mypy, configured in `pyproject.toml`, run over the app package.
+- **Templates**: djlint lints and formats the Jinja2 templates.
+- All three are wired as `pre-commit` framework hooks (`.pre-commit-config.yaml`) that run on `git commit` — not in CI, since no CI pipeline exists yet (automated CI test running is NMVP-NFR-7, non-MVP). `pre-commit install` is a one-time local setup step, called out in the README setup instructions.
+- Deliberately minimal scope: lint + type-check + template-lint only. No security/dependency scanning (bandit, pip-audit), no stylelint, no dependency-lockfile-manager migration — those are separate, deliberate additions to consider later, not part of this step.
+
 ## Local dev workflow (Makefile)
 
 A root-level `Makefile` wraps docker-compose (and in-container commands) behind short, memorable targets. Two containers: `fastapi` and `postgres`.
@@ -72,6 +80,7 @@ A working local skeleton, specifically:
 - `.env.example` plus `.gitignore` entries so no real secrets are ever committed.
 - The root `Makefile` with the targets listed above (`up`, `down`, `logs`, `migrate`, `seed`, `test`, `shell`, `reset`, `up-dev`).
 - The `local-dev-data/` folder with at least the identity-mapping/demo-accounts JSON fixture, plus the seed script that loads whatever's in that folder.
+- `pyproject.toml` with ruff and mypy configuration, plus `.pre-commit-config.yaml` wiring ruff (lint + format), mypy, and djlint as pre-commit hooks.
 
 ## Explicitly out of scope for this step
 

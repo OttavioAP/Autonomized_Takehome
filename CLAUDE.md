@@ -9,6 +9,12 @@
 - **Tested**: both (a) automated tests exist in the backend covering the feature, and (b) a developer has manually exercised the feature in the UI.
 - **Implemented / Deployed / QA**: self-explanatory; mark once genuinely true, not aspirationally.
 
+## Code Invariants & Style Rules
+
+Running list of standing rules agents must follow in this codebase. Unlike `blueprints/specs/`, this file is injected into every agent's context automatically, so binding invariants belong here, not buried in a spec doc.
+
+- **Routes own the DB transaction — not services or repositories.** `Depends(db.get_session)` is declared only in the route signature. The route passes that same `AsyncSession` down through service/repository calls as a plain function argument, and calls `await session.commit()` itself at the end of the happy path — one route handler is one atomic transaction. Services and repositories are plain functions taking `session: AsyncSession` as an explicit parameter; they never declare their own `Depends()` or import FastAPI, so they stay framework-agnostic and unit-testable without a test client. No auto-commit inside the session dependency — on an unhandled exception, `AsyncSession.close()` (from the `async with` block in `get_session` exiting) discards uncommitted work for free, no explicit rollback code needed.
+
 # AI Agent Assignment: Team Activity Monitor (2-Day Sprint)
 
 ## Project Overview

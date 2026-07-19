@@ -1,0 +1,24 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.22
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.3.0
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - pydantic>=2.7
+          - sqlalchemy[asyncio]>=2.0
+        exclude: ^migrations/
+
+  - repo: https://github.com/djlint/djLint
+    rev: v1.40.10
+    hooks:
+      - id: djlint-reformat-jinja
+        files: \.html$
+      - id: djlint-jinja
+        files: \.html$
