@@ -200,6 +200,15 @@ live at `https://team-activity-monitor-a8b9a7.azurewebsites.net/`, both `/` and
    current value — reset, capture the new value, and immediately re-sync
    wherever it's stored, in the same breath.**
 
+**Bug #1 recurred** when the 10 SSO-related secrets (`JIRA_*`, `GH_INTEGRATION_*`,
+`AZURE_*`) were added later — same `echo`-instead-of-`printf` mistake, same
+symptom (`\n` corrupting every URL built from `AZURE_TENANT_ID` etc.), caught by
+CI failing post-push rather than pre-push this time. Fixed the same way
+(`printf '%s' | gh secret set`), then, since this was a two-time recurrence,
+added `scripts/azure/set-secret.sh` as the one reviewed path for setting
+secrets going forward — see the SSO section below and the CHANGELOG entry for
+this date.
+
 ## Azure AD SSO provisioning (MVP-FR-1/FR-2, MVP-NFR-2 prerequisite)
 
 Provisioned ahead of implementing the actual login/logout routes, since
