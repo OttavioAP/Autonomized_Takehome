@@ -1,0 +1,76 @@
+name: Deploy to Azure
+
+# Auto-deploys on every push to main. This is a deliberate departure from the
+# original MVP plan (manual workflow_dispatch only, no standing Azure
+# credentials in GitHub) — see blueprints/deployment.md for the tradeoff and
+# blueprints/specs/stack-and-infra.md for the updated decision. Appropriate for
+# this throwaway ~1-week deployment; revisit before any longer-lived deploy.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t team-activity-monitor:test .
+
+      - name: Run pytest inside the built image
+        run: docker run --rm team-activity-monitor:test pytest
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and push image to ACR
+        run: |
+          az acr login --name "${{ secrets.ACR_NAME }}"
+          IMAGE="${{ secrets.ACR_LOGIN_SERVER }}/team-activity-monitor:${{ github.sha }}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Point Web App at the new image
+        run: |
+          az webapp config container set \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ secrets.AZURE_WEBAPP_NAME }}" \
+            --container-image-name "$IMAGE" \
+            --container-registry-url "https://${{ secrets.ACR_LOGIN_SERVER }}"
+
+      - name: Set app configuration (env vars)
+        run: |
+          az webapp config appsettings set \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --name "${{ secrets.AZURE_WEBAPP_NAME }}" \
+            --settings \
+              APP_ENV=production \
+              DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+              OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY }}" \
+              JIRA_BASE_URL="${{ secrets.JIRA_BASE_URL }}" \
+              JIRA_EMAIL="${{ secrets.JIRA_EMAIL }}" \
+              JIRA_API_TOKEN="${{ secrets.JIRA_API_TOKEN }}" \
+              GITHUB_TOKEN="${{ secrets.GH_INTEGRATION_TOKEN }}" \
+              GITHUB_REPO="${{ secrets.GH_INTEGRATION_REPO }}" \
+              WEBSITES_PORT=8000
+
+      - name: Restart Web App
+        run: |
+          az webapp restart --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" --name "${{ secrets.AZURE_WEBAPP_NAME }}"
+          # A restart triggered by config changes has intermittently left the
+          # site unresponsive despite reporting state=Running (see
+          # blueprints/deployment.md's execution notes) — a second restart has
+          # reliably recovered it both times this was hit locally.
+          sleep 5
+          az webapp restart --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" --name "${{ secrets.AZURE_WEBAPP_NAME }}"

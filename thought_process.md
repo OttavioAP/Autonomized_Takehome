@@ -11,4 +11,5 @@ FastAPI: chosen based on familiarity, built in async (useful for I/O bound app),
 Postgres: chosen based on familiarity, rdms support if the app ever needs multitenancy,rbac or more complex ui to support github/jira workflows as well as pgvector support.
 HTMX: chosen due to my complete lack of experience with it, for its educational value.
 9. Scaffolded repository. decided on 3 layer Fastapi with route, business logic and data access (repository) kept separately.
-10.
+10. Set up deployment of fastapi/postgres on microsoft azure
+11. created 3 dummy protonmail/jira/github accounts to create test data

@@ -2,7 +2,7 @@
 
 Feature tracker for the Team Activity Monitor, split along two axes — **functional vs. non-functional**, and **MVP vs. non-MVP** — with a status column per lifecycle stage. Order of implementation, priority, and tech stack are deliberately out of scope for this document.
 
-**Status columns:** Specced / Implemented / Tested / Deployed / QA. Mark ✅ when done, ⬜ when not. See `CLAUDE.md` for the exact definition of each status and for when this file should be checked and updated.
+**Status columns:** Specced / Implemented / Tested / Deployed / QA. Mark ✅ when done, ⬜ when not, 🟡 when partially done (see the row's own note for what's missing). See `CLAUDE.md` for the exact definition of each status and for when this file should be checked and updated.
 
 ## MVP
 
@@ -64,7 +64,7 @@ Feature tracker for the Team Activity Monitor, split along two axes — **functi
 | NMVP-NFR-4 | Caching of JIRA/GitHub responses | Reduces latency and third-party API call volume by caching recently-fetched activity data. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | NMVP-NFR-5 | Advanced validation of AI inputs/outputs | Content moderation and prompt-injection defenses layered on top of MVP-NFR-4's basic malformed-input/output checks. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | NMVP-NFR-6 | RBAC + organization multi-tenancy | Access-control model with per-role permissions and per-tenant data isolation, superseding MVP-NFR-6's flat model. Requires the signup/onboarding flow at NMVP-FR-4. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| NMVP-NFR-7 | GitHub Actions CI/CD pipeline running automated tests | Wires the test suite from MVP-NFR-8 into a CI/CD pipeline so tests run automatically on every push/PR, gating deploys on passing tests. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
+| NMVP-NFR-7 | GitHub Actions CI/CD pipeline running automated tests | Wires the test suite from MVP-NFR-8 into a CI/CD pipeline so tests run automatically on every push/PR, gating deploys on passing tests. | ⬜ | 🟡 | ⬜ | ⬜ | ⬜ |
 | NMVP-NFR-8 | Concurrent/parallel data fetching | JIRA and GitHub data are fetched in parallel rather than sequentially, reducing end-to-end response latency. Distinct from caching (NMVP-NFR-4), which avoids redundant fetches altogether. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | NMVP-NFR-9 | Tenant data isolation | Explicit guarantee that one organization's chat history, JIRA/GitHub identity mappings, and seed data are never queryable by another tenant. Called out separately from NMVP-NFR-6 (RBAC + multi-tenancy) since isolation is the property that actually has to be verified, not just assumed from RBAC existing. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | NMVP-NFR-10 | Per-tenant usage/cost tracking for OpenRouter | Tracks AI usage (tokens/cost) broken out per organization, so spend is visible once orgs are self-serve (NMVP-FR-4) and paying customers rather than a single demo tenant. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |

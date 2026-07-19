@@ -6,9 +6,9 @@ JIRA/GitHub/OpenRouter). This is a **throwaway deployment**: not expected to sta
 more than about a week, so several choices below deliberately favor low setup cost and
 easy teardown over production-grade rigor.
 
-Status: **plan only, not yet executed.** Nothing in this document has been run against
-real infra yet — this is the agreed shape, pending sign-off, before any `az`/`gh`/JIRA
-commands are actually issued.
+Status: **Track A (Azure) executed and verified — hello-world is live.** Tracks B/C/D
+(JIRA/GitHub sandboxes, fixtures) are in progress; see the sequenced plan below for
+current per-step status.
 
 ## Decisions locked in (discussed and agreed before implementation)
 
@@ -25,18 +25,23 @@ commands are actually issued.
 - **Provisioning/deploy scripts**: committed to `scripts/azure/` (idempotent shell
   scripts), not run ad hoc and discarded — reusable and reviewable, consistent with
   the repo's existing `Makefile`-driven workflow style.
-- **Deploy mechanism for this pass**: direct `az`/`docker` deploy commands run now.
-  The `.github/workflows/deploy.yml` stub (already required by
-  `blueprints/specs/stack-and-infra.md`) is left as a `workflow_dispatch`-only stub
-  with no real Azure credentials wired into GitHub Secrets — avoids standing
-  credentials in GitHub for a one-week app. Wiring real CI/CD deploy is deferred
-  (matches NMVP-NFR-7, non-MVP).
-- **GitHub demo identities**: one throwaway public repo under the user's own existing
-  GitHub account (no new GitHub accounts created). A Personal Access Token
-  (fine-grained, read-only: Contents, Pull requests, Metadata) is scoped to just that
-  repo. All 3 demo team members map to commits/PRs in this single repo; distinct
-  "committers" are represented via `git commit --author` identity per commit, not via
-  3 separate real GitHub accounts.
+- **Deploy mechanism, revised mid-project**: initially direct `az`/`docker` deploy
+  commands only, with `.github/workflows/deploy.yml` left as a `workflow_dispatch`-
+  only stub (no standing Azure credentials in GitHub). **Later changed at the
+  user's explicit request**: `deploy.yml` now auto-deploys on every push to `main`,
+  gated on a `pytest` job passing first (`needs: test`). This required creating a
+  standing Azure service principal credential stored in GitHub Actions secrets — a
+  real tradeoff against the original "no standing credentials" position, accepted
+  because (a) the SP is scoped to just the throwaway resource group via
+  `contributor` role, not the subscription, and (b) the whole deployment is
+  ~1-week-lived anyway. See "CI/CD auto-deploy" below for the full inventory.
+- **GitHub demo identities**: 3 separate throwaway GitHub accounts, created and
+  controlled by the user via 3 distinct ProtonMail addresses — one real GitHub
+  account per demo team member. Each account gets its own fine-grained Personal
+  Access Token (read-only: Contents, Pull requests, Metadata) scoped to a shared
+  throwaway repo (or repos) all 3 accounts contribute to, so commit authorship and
+  PR authorship are genuine per-account activity rather than faked `--author`
+  identities.
 - **JIRA demo identities**: one free JIRA Cloud site (Atlassian free tier supports up
   to 10 users), signed up by the user. Two additional real email addresses the user
   controls are invited as genuine site members, so all 3 demo team members correspond
@@ -92,13 +97,20 @@ commands are actually issued.
 
 ### Track C — GitHub sandbox (independent of Track A)
 
-1. Claude creates one throwaway public repo under the user's GitHub account (with
-   confirmation before creation).
-2. User generates a fine-grained PAT scoped to just that repo (read-only: Contents,
-   Pull requests, Metadata) and shares it via `.env` (not committed).
-3. Claude seeds commits (varied `--author` identities) and a couple of PRs into the
-   repo, enough to exercise MVP-FR-10 (recent commits, active PRs, contributed
-   repos) once that feature is implemented.
+1. User creates 3 ProtonMail addresses and signs up 3 separate GitHub accounts, one
+   per demo team member (browser signup, user's action — Claude cannot create
+   GitHub accounts).
+2. User (or one of the 3 new accounts) creates one throwaway public repo that all 3
+   accounts have write/contributor access to.
+3. User generates a fine-grained PAT per account, scoped to just that repo
+   (read-only: Contents, Pull requests, Metadata — read-only is sufficient for
+   Claude's later API calls even though the accounts themselves need write access
+   to seed the data), and shares all 3 via `.env` (not committed). Only one token is
+   actually needed at query-time (MVP-FR-10 fetches read-only), but seeding requires
+   push access from each account.
+4. Claude seeds genuine commits and a couple of PRs from each of the 3 accounts into
+   the shared repo, enough to exercise MVP-FR-10 (recent commits, active PRs,
+   contributed repos) once that feature is implemented.
 
 ### Track D — Fixtures & documentation
 
@@ -126,11 +138,100 @@ commands are actually issued.
   work (MVP-FR-1/MVP-NFR-2) tracked in `blueprints/specs/stack-and-infra.md`, not
   part of this deployment pass.
 
+## CI/CD auto-deploy (added after initial deploy, at user request)
+
+`.github/workflows/deploy.yml` has two jobs:
+- **`test`**: builds the Docker image, runs `pytest` inside it (`docker run --rm
+  <image> pytest`) — no compose stack needed since current tests don't touch a
+  real DB.
+- **`deploy`** (`needs: test`, so it never runs if tests fail): builds/pushes the
+  image to ACR tagged with `${{ github.sha }}`, points the Web App at it, sets app
+  settings, and restarts (twice — see the interrupted-pull note above, ported into
+  this workflow too).
+
+Triggers on push to `main` and manual `workflow_dispatch`.
+
+**GitHub Actions secrets set on `OttavioAP/Autonomized_Takehome`:**
+- `AZURE_CREDENTIALS` — service principal JSON (`az ad sp create-for-rbac
+  --sdk-auth`), `contributor` role scoped to just the
+  `team-activity-monitor-a8b9a7` resource group, not the subscription.
+- `AZURE_RESOURCE_GROUP`, `AZURE_WEBAPP_NAME`, `ACR_NAME`, `ACR_LOGIN_SERVER` —
+  plain identifiers, mirror `scripts/azure/.state`.
+- `DATABASE_URL` — same connection string `deploy.sh` uses locally (includes the
+  Postgres admin password).
+- `OPENROUTER_API_KEY` — copied from local `.env`.
+- `JIRA_BASE_URL`/`JIRA_EMAIL`/`JIRA_API_TOKEN`, `GH_INTEGRATION_TOKEN`/
+  `GH_INTEGRATION_REPO` — referenced in the workflow but **not yet set** as of this
+  writing (Tracks B/C still in progress); they'll inject as empty strings until
+  set, which doesn't break the hello-world app.
+
+The GitHub PAT used to authenticate `gh` for this (`My_Github_PAT`, stored in
+local `.env`) is a broad classic PAT with far more scope (`admin:org`,
+`delete_repo`, `admin:enterprise`, etc.) than this task needs — worth rotating to
+a fine-grained PAT scoped to just this repo with `repo`+`workflow` permissions if
+this setup outlives the throwaway week.
+
 ## Open items / risks
 
-- Azure free-tier quota limits (vCPU/region availability) are unknown until
-  `provision.sh` is actually run — may require a fallback region or SKU.
 - JIRA free tier's 10-user cap is not a concern at 3 users, but worth noting if the
   roster ever grows (see NMVP-FR-9 in features.md).
 - Teardown must actually be run at the end of the week — this plan does not include
   an automated reminder/expiry; flagging here so it isn't forgotten.
+
+## Execution notes (what actually happened, Track A)
+
+- **New Azure subscriptions start on `FreeTrial_2014-09-01` quota**, which silently
+  blocks Postgres Flexible Server creation in `eastus` with an opaque "location is
+  restricted" error (no useful detail from `az`). Fix: upgrade the subscription to
+  Pay-As-You-Go billing in the Azure Portal (still draws down the free credit first;
+  no cost unless the credit is exceeded). This unblocked Postgres, but not compute.
+- **Separately, this subscription has a 0-VM App Service/compute quota in `eastus`**
+  (and `eastus2`/`westus`), confirmed via `Operation cannot be completed without
+  additional quota` on both B1 and F1 (free) App Service plan tiers — a distinct
+  restriction from the Postgres one above, not fixed by the billing upgrade alone.
+  Trial-and-error across regions found **`centralus` and `westus2` have working
+  compute quota** on this subscription; `centralus` was chosen since Postgres also
+  landed there. **Resolution: the resource group and ACR stay in `eastus`
+  (`LOCATION`), but Postgres Flexible Server and the App Service plan/webapp are
+  pinned to `centralus` (`COMPUTE_LOCATION`)** — see `scripts/azure/lib.sh`. A
+  resource group can hold resources from multiple regions, so this is not a
+  functional problem, just a naming/tracking one now captured in
+  `scripts/azure/.state`.
+- `az postgres flexible-server db create` takes `--name`, not `--database-name` as
+  originally drafted in `provision.sh` — fixed.
+- `--deployment-container-image-name` is deprecated in favor of
+  `--container-image-name` on `az webapp create` — fixed.
+- **`deploy.sh` originally `source`d `.env` directly**, which shell-evaluates its
+  contents — real secret values containing `$`, `` ` ``, or `#` (e.g. a GitHub
+  account password like `gwefjweas#$3`) broke this under `set -u` ("unbound
+  variable: $3"). Fixed by parsing `.env` line-by-line as inert `KEY=VALUE` text
+  instead of sourcing it as shell.
+- Docker required `sudo`/group membership on this machine (`oz` wasn't in the
+  `docker` group). `sg docker -c "<command>"` runs a command under the `docker`
+  group within the current session without needing a fresh login shell — used this
+  instead of blocking on a new terminal session after `usermod -aG docker oz`.
+- End-to-end result: hello-world deployed and verified live at
+  `https://team-activity-monitor-a8b9a7.azurewebsites.net/` (200 OK, htmx `/ping`
+  fragment route also verified working) via `scripts/azure/provision.sh` +
+  `scripts/azure/deploy.sh`.
+- **Mixed-content bug**: the deployed page initially rendered `<link>`/`<script>`
+  tags with `http://` URLs on an `https://`-served page (browser blocked them,
+  breaking both styling and htmx). Root cause: Azure App Service terminates TLS at
+  its edge and forwards to the container over plain HTTP, so Uvicorn/Starlette's
+  `url_for()` saw every request as `http://` by default. Fixed by adding
+  `--proxy-headers --forwarded-allow-ips=*` to the Dockerfile's `uvicorn` CMD, so
+  Uvicorn honors Azure's `X-Forwarded-Proto: https` header when building absolute
+  URLs. Confirmed via a temporary `/debug-headers` diagnostic route (added, used to
+  inspect `request.scope["scheme"]` and the raw incoming headers, then removed) —
+  Azure does send `x-forwarded-proto: https` on every request, once at the
+  `centralus` App Service reached by the fix.
+- **Intermittent interrupted-pull-on-restart**: twice observed, after
+  `az webapp config container set` + the restart deploy.sh triggers, the Docker log
+  shows `Container pull image interrupted. Revert by terminate.` — the site then
+  reports `state=Running` via `az webapp show` while actually serving nothing
+  (every request times out). A second `az webapp restart` reliably recovers it both
+  times. Root cause not fully understood (possibly the config-triggered restart and
+  the explicit restart racing each other); `deploy.sh` now issues a second restart
+  automatically as cheap insurance. If this recurs and a third restart is ever
+  needed, treat that as a signal to investigate further rather than keep adding
+  restarts.
