@@ -1,11 +1,7 @@
 {% extends "base.html" %}
-
-{% block title %}Team Activity Monitor{% endblock %}
-
+{% block title %}Team Activity Monitor{% endblock title %}
 {% block content %}
-  <h1>Team Activity Monitor</h1>
-  <button hx-get="/ping" hx-target="#ping-result" hx-swap="innerHTML">
-    Ping the server
-  </button>
-  <div id="ping-result"></div>
-{% endblock %}
+    <h1>Team Activity Monitor</h1>
+    <button hx-get="/ping" hx-target="#ping-result" hx-swap="innerHTML">Ping the server</button>
+    <div id="ping-result"></div>
+{% endblock content %}

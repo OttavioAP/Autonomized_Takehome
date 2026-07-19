@@ -1,11 +1,10 @@
 import asyncio
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-
-from alembic import context
 
 import app.db.models  # noqa: F401  registers every model onto Base.metadata
 from app.config import get_settings
@@ -33,6 +32,7 @@ def process_revision_directives(context, revision, directives):
     if script.upgrade_ops.is_empty():
         directives[:] = []
         print("No schema changes detected - skipping migration file.")
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

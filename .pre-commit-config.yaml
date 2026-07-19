@@ -19,6 +19,6 @@ repos:
     rev: v1.40.10
     hooks:
       - id: djlint-reformat-jinja
-        files: \.html$
+        types_or: [html]
       - id: djlint-jinja
-        files: \.html$
+        types_or: [html]
