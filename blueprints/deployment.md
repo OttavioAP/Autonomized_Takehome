@@ -171,6 +171,35 @@ local `.env`) is a broad classic PAT with far more scope (`admin:org`,
 a fine-grained PAT scoped to just this repo with `repo`+`workflow` permissions if
 this setup outlives the throwaway week.
 
+**Two real bugs hit and fixed while getting the first CI run green** (verified
+live at `https://team-activity-monitor-a8b9a7.azurewebsites.net/`, both `/` and
+`/ping` returning 200 with correct `https://` asset links, after 4 failed runs):
+
+1. `ACR_NAME`, `ACR_LOGIN_SERVER`, `AZURE_RESOURCE_GROUP`, and `AZURE_WEBAPP_NAME`
+   were originally set via `echo "$VAR" | gh secret set ...` — plain `echo`
+   appends a trailing newline, which got baked into the secret value. This broke
+   `az acr login --name "tamacra8b9a7\n"` with a misleading "resource could not be
+   found in subscription" error (looked like an RBAC/permissions problem, wasted
+   time chasing an `AcrPush` role grant that turned out to be unnecessary — plain
+   `contributor` on the resource group is sufficient). The tell: GitHub's log
+   masking (`***`) rendered the secret across two log lines instead of one,
+   which is what actually gave it away. **Fix: always use `printf '%s' "$VAR" |
+   gh secret set ...`, never `echo`, for secrets that get shell-interpolated
+   downstream.**
+2. While locally testing whether the service principal's role assignment was the
+   problem, `az ad app credential reset --append` was run twice to generate test
+   secrets, then the credentials were deleted in the wrong order — ending up
+   deleting the *original* credential (the one whose value was already stored in
+   the `AZURE_CREDENTIALS` GitHub secret) rather than the test ones. This
+   surfaced as `AADSTS7000215: Invalid client secret provided` on the *next* run,
+   a completely different error from bug #1, right after #1 seemed fixed — easy
+   to mistake for a new, unrelated failure. Fix: generated one fresh credential,
+   rebuilt the full `--sdk-auth`-shaped JSON around it, re-uploaded to
+   `AZURE_CREDENTIALS`. **Lesson: don't test a service principal's credentials by
+   resetting/deleting them ad hoc once a real secret already depends on the
+   current value — reset, capture the new value, and immediately re-sync
+   wherever it's stored, in the same breath.**
+
 ## Open items / risks
 
 - JIRA free tier's 10-user cap is not a concern at 3 users, but worth noting if the
