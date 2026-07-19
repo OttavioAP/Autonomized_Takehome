@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     github_token: str
     github_repo: str
 
+    openrouter_api_key: str
+
+    azure_tenant_id: str
+    azure_client_id: str
+    azure_client_secret: str
+    azure_redirect_uri: str
+
 
 @lru_cache
 def get_settings() -> Settings:

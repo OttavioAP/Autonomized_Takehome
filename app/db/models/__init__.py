@@ -1,3 +1,3 @@
-from app.db.models.smoke_test import SmokeTest
+from app.db.models.session import UserSession
 
-__all__ = ["SmokeTest"]
+__all__ = ["UserSession"]

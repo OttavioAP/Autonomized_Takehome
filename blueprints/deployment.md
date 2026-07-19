@@ -200,12 +200,64 @@ live at `https://team-activity-monitor-a8b9a7.azurewebsites.net/`, both `/` and
    current value — reset, capture the new value, and immediately re-sync
    wherever it's stored, in the same breath.**
 
+## Azure AD SSO provisioning (MVP-FR-1/FR-2, MVP-NFR-2 prerequisite)
+
+Provisioned ahead of implementing the actual login/logout routes, since
+`stack-and-infra.md` calls out a working Azure AD app registration as a real local-dev
+prerequisite, not an afterthought.
+
+- **3 Azure AD user accounts** created in the tenant (`ottavioantperuzzigmail.onmicrosoft.com`,
+  a personal "Default Directory" where the signed-in `az` user already holds Global
+  Administrator — confirmed via `az rest GET /me/memberOf` before creating anything):
+  `john@`, `sarah@`, `mike@ottavioantperuzzigmail.onmicrosoft.com`, matching the
+  John/Sarah/Mike identities already seeded in `local-dev-data/team_members.json`.
+  Each has its own generated password, deliberately separate from the
+  Protonmail/JIRA/GitHub credentials — so anyone demoing the app (e.g. an interviewer)
+  logs in with a throwaway Azure identity, not a real inbox's credentials. Credentials
+  are in `.env` (`Azure_{John,Sarah,Mike}_{UPN,Password}`), not committed.
+- **App registration** "Team Activity Monitor - Local Dev" (confidential client,
+  `AzureADMyOrg` single-tenant audience), with **two** redirect URIs:
+  `http://localhost:8000/auth/callback` (local dev) and
+  `https://team-activity-monitor-a8b9a7.azurewebsites.net/auth/callback` (deployed
+  instance). Client secret generated (1 year validity). `AZURE_TENANT_ID`,
+  `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_REDIRECT_URI` added to `.env` and
+  `app.config.Settings`; the deployed app gets its own `AZURE_REDIRECT_URI` value
+  (`AZURE_REDIRECT_URI_PROD` secret) via `deploy.yml`'s appsettings step, since the two
+  environments need different callback URLs registered against the same app.
+- **Delegated Graph permissions** (`openid`, `profile`, `email`, `User.Read`) added and
+  admin-consented tenant-wide (`AllPrincipals`), so all 3 users can complete the OIDC
+  flow without an individual per-user consent prompt.
+- **Login/logout routes implemented** (`app/api/auth.py`, `app/auth/oidc.py`,
+  `app/auth/dependency.py`): `GET /auth/login` redirects to Azure with a CSRF-safe
+  `state` param stored in a short-lived cookie; `GET /auth/callback` validates that
+  state, exchanges the code for tokens, validates the ID token's signature against
+  JWKS (issuer/audience/expiry), creates a `sessions` row, and sets the opaque session
+  cookie; `POST /auth/logout` is CSRF-token-protected and marks the session revoked.
+  `get_current_user` (the single shared enforcement dependency) protects `/` and
+  redirects unauthenticated HTML requests to `/login` rather than raising a raw 401.
+  17 automated tests pass, including a regression test that hits Microsoft's real
+  authorize endpoint (caught a real bug during development: `authority()` and
+  `issuer()` need to be different base URLs — `/oauth2/v2.0/authorize` hangs off the
+  tenant root, not off `/v2.0`, which is only the OIDC issuer claim's own path).
+- **CI updated to match**: `deploy.yml`'s `test` job previously ran
+  `docker run --rm image pytest` with zero env vars and no Postgres — it happened to
+  pass before only because no test exercised `Settings()`/the DB at import time. Once
+  `get_current_user` made that import-time `Settings()` load unavoidable, CI started
+  failing. Fixed by adding a `postgres:16` service container, running
+  `alembic upgrade head` before `pytest` inside the built image (connected via
+  `--network=host`), and passing all required env vars from secrets. Also added the 10
+  JIRA/GitHub/Azure secrets that were missing from GitHub Actions (the `deploy` job's
+  appsettings step was already referencing several of these secrets before they
+  existed — a pre-existing gap, not something introduced here).
+
 ## Open items / risks
 
 - JIRA free tier's 10-user cap is not a concern at 3 users, but worth noting if the
   roster ever grows (see NMVP-FR-9 in features.md).
 - Teardown must actually be run at the end of the week — this plan does not include
-  an automated reminder/expiry; flagging here so it isn't forgotten.
+  an automated reminder/expiry; flagging here so it isn't forgotten. **Now also covers
+  the 3 Azure AD users and the app registration created for SSO** — not just the
+  webapp/Postgres/ACR resources from Track A.
 
 ## Execution notes (what actually happened, Track A)
 

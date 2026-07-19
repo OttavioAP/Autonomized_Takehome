@@ -13,14 +13,48 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: team_activity_monitor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
       - name: Build image
         run: docker build -t team-activity-monitor:test .
 
-      - name: Run pytest inside the built image
-        run: docker run --rm team-activity-monitor:test pytest
+      - name: Run migrations and pytest inside the built image
+        # --network=host lets the container reach the postgres service on
+        # localhost:5432 the same way GHA service containers are normally
+        # reached from job steps - needed since this runs via `docker run`
+        # directly rather than as another GHA service/step.
+        run: |
+          docker run --rm --network=host \
+            -e DATABASE_URL="postgresql+asyncpg://app:app@localhost:5432/team_activity_monitor" \
+            -e APP_ENV="development" \
+            -e OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY }}" \
+            -e JIRA_BASE_URL="${{ secrets.JIRA_BASE_URL }}" \
+            -e JIRA_PROJECT_KEY="${{ secrets.JIRA_PROJECT_KEY }}" \
+            -e JIRA_EMAIL="${{ secrets.JIRA_EMAIL }}" \
+            -e JIRA_API_TOKEN="${{ secrets.JIRA_API_TOKEN }}" \
+            -e GITHUB_TOKEN="${{ secrets.GH_INTEGRATION_TOKEN }}" \
+            -e GITHUB_REPO="${{ secrets.GH_INTEGRATION_REPO }}" \
+            -e AZURE_TENANT_ID="${{ secrets.AZURE_TENANT_ID }}" \
+            -e AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID }}" \
+            -e AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET }}" \
+            -e AZURE_REDIRECT_URI="${{ secrets.AZURE_REDIRECT_URI }}" \
+            team-activity-monitor:test \
+            sh -c "alembic upgrade head && pytest"
 
   deploy:
     needs: test
@@ -59,10 +93,15 @@ jobs:
               DATABASE_URL="${{ secrets.DATABASE_URL }}" \
               OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY }}" \
               JIRA_BASE_URL="${{ secrets.JIRA_BASE_URL }}" \
+              JIRA_PROJECT_KEY="${{ secrets.JIRA_PROJECT_KEY }}" \
               JIRA_EMAIL="${{ secrets.JIRA_EMAIL }}" \
               JIRA_API_TOKEN="${{ secrets.JIRA_API_TOKEN }}" \
               GITHUB_TOKEN="${{ secrets.GH_INTEGRATION_TOKEN }}" \
               GITHUB_REPO="${{ secrets.GH_INTEGRATION_REPO }}" \
+              AZURE_TENANT_ID="${{ secrets.AZURE_TENANT_ID }}" \
+              AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID }}" \
+              AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET }}" \
+              AZURE_REDIRECT_URI="${{ secrets.AZURE_REDIRECT_URI_PROD }}" \
               WEBSITES_PORT=8000
 
       - name: Restart Web App

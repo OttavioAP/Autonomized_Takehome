@@ -1,8 +1,14 @@
 from httpx import AsyncClient
 
 
-async def test_index_renders_ping_button(client: AsyncClient) -> None:
-    response = await client.get("/")
+async def test_index_requires_auth(client: AsyncClient) -> None:
+    response = await client.get("/", follow_redirects=False, headers={"accept": "text/html"})
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login"
+
+
+async def test_index_renders_ping_button(authenticated_client: AsyncClient) -> None:
+    response = await authenticated_client.get("/")
     assert response.status_code == 200
     assert "Ping the server" in response.text
 

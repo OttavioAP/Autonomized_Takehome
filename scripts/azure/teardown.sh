@@ -24,5 +24,30 @@ fi
 echo "Deletion started (--no-wait). Check progress with:"
 echo "  ${AZ} group show --name ${RESOURCE_GROUP}"
 
+# AD users and app registrations are tenant-level, not resource-group-scoped, so
+# `az group delete` above does not touch them - clean up separately. Pulled from
+# .env (not scripts/azure/.state, which only tracks resource-group-scoped names).
+ENV_FILE="${REPO_ROOT}/.env"
+if [[ -f "${ENV_FILE}" ]]; then
+  AZURE_CLIENT_ID="$(grep -E '^AZURE_CLIENT_ID=' "${ENV_FILE}" | cut -d= -f2-)"
+  JOHN_UPN="$(grep -E '^Azure_John_UPN=' "${ENV_FILE}" | cut -d= -f2-)"
+  SARAH_UPN="$(grep -E '^Azure_Sarah_UPN=' "${ENV_FILE}" | cut -d= -f2-)"
+  MIKE_UPN="$(grep -E '^Azure_Mike_UPN=' "${ENV_FILE}" | cut -d= -f2-)"
+
+  if [[ -n "${AZURE_CLIENT_ID:-}" ]]; then
+    echo "Deleting SSO app registration ${AZURE_CLIENT_ID}..."
+    "${AZ}" ad app delete --id "${AZURE_CLIENT_ID}" || echo "  (already gone or delete failed, continuing)"
+  fi
+
+  for upn in "${JOHN_UPN:-}" "${SARAH_UPN:-}" "${MIKE_UPN:-}"; do
+    if [[ -n "${upn}" ]]; then
+      echo "Deleting Azure AD user ${upn}..."
+      "${AZ}" ad user delete --id "${upn}" || echo "  (already gone or delete failed, continuing)"
+    fi
+  done
+else
+  echo "No .env found — skipping Azure AD user/app-registration cleanup." >&2
+fi
+
 rm -f "${STATE_FILE}" "${STATE_FILE}.pgpass"
 echo "Local state files removed."

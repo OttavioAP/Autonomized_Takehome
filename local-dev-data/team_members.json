@@ -1,16 +1,19 @@
 [
   {
     "display_name": "John",
+    "azure_upn": "john@ottavioantperuzzigmail.onmicrosoft.com",
     "jira_account_email": "Autonomized_Test_1@proton.me",
     "github_login": "Autonomized1"
   },
   {
     "display_name": "Sarah",
+    "azure_upn": "sarah@ottavioantperuzzigmail.onmicrosoft.com",
     "jira_account_email": "Autonomized_Test_2@proton.me",
     "github_login": "autonomized2"
   },
   {
     "display_name": "Mike",
+    "azure_upn": "mike@ottavioantperuzzigmail.onmicrosoft.com",
     "jira_account_email": "Autonomized_Test_3@proton.me",
     "github_login": "autonomized3"
   }

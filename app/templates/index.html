@@ -1,7 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Team Activity Monitor{% endblock title %}
 {% block content %}
-    <h1>Team Activity Monitor elephant</h1>
+    <nav>
+        <ul>
+            <li><strong>Team Activity Monitor</strong></li>
+        </ul>
+        <ul>
+            <li>{{ current_user.user_display_name }}</li>
+            <li>
+                <form method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ current_user.csrf_token }}" />
+                    <button type="submit" class="secondary">Sign out</button>
+                </form>
+            </li>
+        </ul>
+    </nav>
     <button hx-get="/ping" hx-target="#ping-result" hx-swap="innerHTML">Ping the server</button>
     <div id="ping-result"></div>
 {% endblock content %}
