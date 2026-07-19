@@ -1,7 +1,7 @@
 .PHONY: up down logs migrate revision seed test shell reset up-dev
 
 up:
-	DOCKER_UID=$$(id -u) DOCKER_GID=$$(id -g) docker compose up -d --build
+	DOCKER_UID=$${SUDO_UID:-$$(id -u)} DOCKER_GID=$${SUDO_GID:-$$(id -g)} docker compose up -d --build
 
 down:
 	docker compose down

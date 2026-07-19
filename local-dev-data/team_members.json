@@ -1,0 +1,17 @@
+[
+  {
+    "display_name": "John",
+    "jira_account_email": "Autonomized_Test_1@proton.me",
+    "github_login": "Autonomized1"
+  },
+  {
+    "display_name": "Sarah",
+    "jira_account_email": "Autonomized_Test_2@proton.me",
+    "github_login": "autonomized2"
+  },
+  {
+    "display_name": "Mike",
+    "jira_account_email": "Autonomized_Test_3@proton.me",
+    "github_login": "autonomized3"
+  }
+]

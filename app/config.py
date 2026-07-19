@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     database_url: str
     app_env: str = "development"
 
+    jira_base_url: str
+    jira_project_key: str
+    jira_email: str
+    jira_api_token: str
+
+    github_token: str
+    github_repo: str
+
 
 @lru_cache
 def get_settings() -> Settings:
