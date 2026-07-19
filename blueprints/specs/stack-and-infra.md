@@ -11,7 +11,7 @@ Spec for timeline.md step 3 ("Stand up minimum structure/infra"). Scope is a wor
 - **LLM**: OpenRouter.
 - **Not in the stack**: pgvector, Redis, LISTEN/NOTIFY — all explicitly deferred (pgvector/Redis until RAG, NMVP-FR-1, is actually spec'd; LISTEN/NOTIFY dropped, no concrete use case).
 - **Deployment target**: Azure, single FastAPI process serving both htmx pages/fragments and API routes — no separate frontend server.
-- **CI/CD**: none for MVP. No automated test-on-push pipeline (that's NMVP-NFR-7, non-MVP). Only a manually-triggered (`workflow_dispatch`) GitHub Actions workflow whose sole job is deploy + inject secrets from GH Actions secrets — scaffold the workflow file now, doesn't need working Azure credentials yet.
+- **CI/CD**: none for MVP. No automated test-on-push pipeline (that's NMVP-NFR-7, non-MVP). Only a manually-triggered (`workflow_dispatch`) GitHub Actions workflow whose sole job is deploy + inject secrets from GH Actions secrets. The `deploy.yml` stub itself is a deliverable of timeline step 4 (deploy hello world to Azure), not this step — see `blueprints/deployment.md`.
 - **Config**: environment variables loaded from a single `.env` file at the repo root, `.gitignore`'d, no hardcoded secrets (MVP-NFR-9). `.env` is read both by docker-compose (for compose-level variable substitution and passing through to the containers via `env_file`) and by the FastAPI app at runtime. An `.env.example` with placeholder values is committed so the real `.env` can be recreated from scratch.
 - **Testing**: pytest. Because the stack may lean on Postgres-specific features later (row-level security for tenant isolation, pgvector), tests should run against a real Postgres instance from the start — a docker-compose Postgres service, not SQLite.
 
@@ -75,8 +75,7 @@ A working local skeleton, specifically:
 - SQLAlchemy async engine configured against Postgres; Alembic initialized, with an initial migration covering at least the `sessions`, identity-mapping, `conversations`, and `messages` tables (schema can be refined later at spec/implement time — this just needs the pipeline proven end-to-end).
 - A docker-compose file bringing up both containers — `fastapi` and a local Postgres matching whatever version will run on Azure.
 - A single hello-world route rendering a Jinja2 template with htmx wired in, proving the whole request path works.
-- pytest scaffolded to run against the docker-compose Postgres.
-- A `.github/workflows/deploy.yml` stub using `workflow_dispatch` (manual trigger only) — doesn't need working Azure credentials yet, just needs to exist as the intended deploy mechanism.
+- pytest scaffolded to run against the docker-compose Postgres, and verified to run standalone inside the built image (no bind mount, no compose) since it travels with whatever gets deployed.
 - `.env.example` plus `.gitignore` entries so no real secrets are ever committed.
 - The root `Makefile` with the targets listed above (`up`, `down`, `logs`, `migrate`, `seed`, `test`, `shell`, `reset`, `up-dev`).
 - The `local-dev-data/` folder with at least the identity-mapping/demo-accounts JSON fixture, plus the seed script that loads whatever's in that folder.

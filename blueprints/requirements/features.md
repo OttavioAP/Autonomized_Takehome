@@ -27,7 +27,7 @@ Feature tracker for the Team Activity Monitor, split along two axes — **functi
 
 | # | Feature | Description | Specced | Implemented | Tested | Deployed | QA |
 |---|---------|-------------|:---:|:---:|:---:|:---:|:---:|
-| MVP-NFR-1 | Deployment to Microsoft Azure | The application is hosted on Azure infrastructure rather than run only locally, enabling shared/team access to the demo instance. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
+| MVP-NFR-1 | Deployment to Microsoft Azure | The application is hosted on Azure infrastructure rather than run only locally, enabling shared/team access to the demo instance. | ✅ | ✅ | ✅ | ✅ | ⬜ |
 | MVP-NFR-2 | Azure SSO integration | Authentication is backed by the organization's real Azure identity provider rather than a mock or locally-managed login; underlies MVP-FR-1. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | MVP-NFR-3 | Authentication with JIRA, GitHub, and OpenRouter APIs | The backend holds and uses valid API credentials/tokens to call all three third-party services on the user's behalf. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | MVP-NFR-4 | Basic validation of AI inputs/outputs | Guards against malformed input reaching the AI layer and malformed output (e.g., invalid JSON) leaving it. Does not include content moderation or prompt-injection defenses — those are deferred to NMVP-NFR-5. | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
