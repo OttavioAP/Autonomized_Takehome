@@ -1,0 +1,8 @@
+{#
+    Small inline error marker fragment for `cite-error` SSE events, rendered
+    in place of a pill when a citation fails validation. Expects `ordinal`
+    (int) and `detail` (str) - per chat.md's CiteErrorEvent. Visually distinct
+    from a normal pill but not alarming - this represents a backend bug, not
+    a user-facing error state.
+#}
+<span class="cite-error" title="{{ detail }}">[{{ ordinal }}: unresolved citation]</span>

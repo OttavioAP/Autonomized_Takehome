@@ -1,0 +1,39 @@
+# Local-dev-only image, used by docker-compose.override.yml. CI/deploy build the plain
+# Dockerfile directly (see .github/workflows/deploy.yml), so this never reaches prod.
+# Identical to Dockerfile except it also installs the Azure CLI, so azure-identity's
+# DefaultAzureCredential can fall through to AzureCliCredential inside the fastapi
+# container, matching the developer's own `az login` identity - the same
+# Managed-Identity-in-prod/az-login-locally path app/services/token_store.py's Key Vault
+# access relies on (see blueprints/plans/features/oauth-integration.md's Token storage
+# section). Without this, DefaultAzureCredential has no credential source inside the
+# container at all and every Key Vault call fails.
+FROM python:3.11-slim
+
+ARG UID=1000
+ARG GID=1000
+
+RUN groupadd --gid "${GID}" appuser \
+    && useradd --uid "${UID}" --gid "${GID}" --create-home appuser
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && curl -sL https://aka.ms/InstallAzureCLIDeb | bash \
+    && apt-get purge -y curl \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml requirements.lock.txt ./
+RUN pip install --no-cache-dir -r requirements.lock.txt
+
+COPY . .
+RUN pip install --no-cache-dir -e . --no-deps \
+    && chmod +x entrypoint.sh \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8000
+
+CMD ["./entrypoint.sh"]

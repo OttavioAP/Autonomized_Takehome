@@ -29,7 +29,7 @@ schema, and client rework.
 
 ## Schema
 
-Four new tables. `conversations`/`messages` were already anticipated by MVP-FR-7/stack-and-infra.md; `activity_items`/`message_citations` are new, driven by the citation design.
+Five new tables, built across two phases per `timeline.md`'s Build Phases: `team_members` moved to Phase 1 (step 0) since the OAuth token-persistence design now depends on it existing before any OAuth code runs; `conversations`/`messages`/`activity_items`/`message_citations` remain Phase 2, built together as originally planned. `conversations`/`messages` were already anticipated by MVP-FR-7/stack-and-infra.md; `activity_items`/`message_citations` are new, driven by the citation design.
 
 ### `team_members`
 
@@ -66,7 +66,7 @@ not just a session, which is what makes this possible without a schema change:
 |---|---|---|
 | `id` | UUID PK | |
 | `conversation_id` | FK → `conversations.id` | |
-| `role` | text | `user` \| `assistant` \| `system` |
+| `role` | `MessageRole` (native DB enum, `app/db/models/message.py`) | `user` \| `assistant` \| `system` |
 | `content` | text | Raw text **with citation sentinels embedded** (`{{cite:ordinal:uuid}}`) — not stripped. One source of truth for both live rendering and history replay. |
 | `created_at` | timestamptz | Provides message ordering within a conversation |
 

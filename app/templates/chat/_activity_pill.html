@@ -1,0 +1,16 @@
+{% macro activity_pill(kind, label, url) %}
+    {% if kind == "jira_ticket" %}
+        {% set css_class = "jira" %}
+        {% set prefix = "JIRA" %}
+    {% elif kind == "github_pr" %}
+        {% set css_class = "github" %}
+        {% set prefix = "PR" %}
+    {% else %}
+        {% set css_class = "github" %}
+        {% set prefix = "Commit" %}
+    {% endif %}
+    <a class="activity-pill activity-pill--{{ css_class }}"
+       href="{{ url }}"
+       target="_blank"
+       rel="noopener noreferrer">{{ prefix }}: {{ label }}</a>
+{% endmacro %}

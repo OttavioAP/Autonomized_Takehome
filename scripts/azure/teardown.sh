@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deletes the entire resource group created by provision.sh, cascading to every
-# resource inside it (Postgres, ACR, App Service plan/webapp). One command to
-# clean up the whole throwaway deployment at the end of the week.
+# resource inside it (Postgres, ACR, App Service plan/webapp, Key Vault). One
+# command to clean up the whole throwaway deployment at the end of the week.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 source ./lib.sh
@@ -23,6 +23,23 @@ fi
 
 echo "Deletion started (--no-wait). Check progress with:"
 echo "  ${AZ} group show --name ${RESOURCE_GROUP}"
+
+# Key Vault has soft-delete on by default, so `az group delete` above only
+# soft-deletes it - it lingers (and keeps its name reserved tenant-wide) for
+# the retention period unless purged. Purge is itself tenant-level, not
+# resource-group-scoped (same reason AD cleanup below is separate from the
+# group delete), and it has to wait until the group delete above has actually
+# removed the vault, so poll for that first rather than racing it.
+if [[ -n "${KEY_VAULT_NAME:-}" ]]; then
+  echo "Waiting for resource group deletion to finish before purging the soft-deleted vault..."
+  while "${AZ}" group show --name "${RESOURCE_GROUP}" --output none 2>/dev/null; do
+    sleep 10
+  done
+
+  echo "Purging soft-deleted Key Vault ${KEY_VAULT_NAME}..."
+  "${AZ}" keyvault purge --name "${KEY_VAULT_NAME}" --location "${LOCATION}" \
+    || echo "  (already purged, not yet soft-deleted, or purge failed - continuing)"
+fi
 
 # AD users and app registrations are tenant-level, not resource-group-scoped, so
 # `az group delete` above does not touch them - clean up separately. Pulled from

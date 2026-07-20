@@ -38,21 +38,42 @@ jobs:
         # localhost:5432 the same way GHA service containers are normally
         # reached from job steps - needed since this runs via `docker run`
         # directly rather than as another GHA service/step.
+        #
+        # tests/integrations/test_token_store.py hits the real Azure Key Vault, so this
+        # container needs a real Azure credential for that too - but it can't just reuse
+        # AZURE_CLIENT_ID/_SECRET/_TENANT_ID above, since those are the unrelated SSO app
+        # registration's credentials and EnvironmentCredential (part of
+        # DefaultAzureCredential's fallback chain) would authenticate as that app instead,
+        # which has no Key Vault role and would 403. KEY_VAULT_CLIENT_ID/_SECRET/_TENANT_ID
+        # are distinctly-named Settings fields read by ClientSecretCredential explicitly
+        # (see app/services/token_store.py's _credential()) - AZURE_CREDENTIALS' service
+        # principal (already used by the deploy job below, additionally granted Key Vault
+        # Secrets Officer on the vault) is reused here rather than provisioning a second
+        # identity just for this.
         run: |
+          AZURE_CREDS='${{ secrets.AZURE_CREDENTIALS }}'
+          KV_CLIENT_ID="$(echo "$AZURE_CREDS" | python3 -c 'import json,sys; print(json.load(sys.stdin)["clientId"])')"
+          KV_CLIENT_SECRET="$(echo "$AZURE_CREDS" | python3 -c 'import json,sys; print(json.load(sys.stdin)["clientSecret"])')"
+          KV_TENANT_ID="$(echo "$AZURE_CREDS" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tenantId"])')"
+
           docker run --rm --network=host \
             -e DATABASE_URL="postgresql+asyncpg://app:app@localhost:5432/team_activity_monitor" \
             -e APP_ENV="development" \
             -e OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY }}" \
-            -e JIRA_BASE_URL="${{ secrets.JIRA_BASE_URL }}" \
-            -e JIRA_PROJECT_KEY="${{ secrets.JIRA_PROJECT_KEY }}" \
-            -e JIRA_EMAIL="${{ secrets.JIRA_EMAIL }}" \
-            -e JIRA_API_TOKEN="${{ secrets.JIRA_API_TOKEN }}" \
-            -e GITHUB_TOKEN="${{ secrets.GH_INTEGRATION_TOKEN }}" \
-            -e GITHUB_REPO="${{ secrets.GH_INTEGRATION_REPO }}" \
             -e AZURE_TENANT_ID="${{ secrets.AZURE_TENANT_ID }}" \
             -e AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID }}" \
             -e AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET }}" \
             -e AZURE_REDIRECT_URI="${{ secrets.AZURE_REDIRECT_URI }}" \
+            -e JIRA_OAUTH_CLIENT_ID="${{ secrets.JIRA_OAUTH_CLIENT_ID }}" \
+            -e JIRA_OAUTH_CLIENT_SECRET="${{ secrets.JIRA_OAUTH_CLIENT_SECRET }}" \
+            -e JIRA_OAUTH_REDIRECT_URI="${{ secrets.JIRA_OAUTH_REDIRECT_URI }}" \
+            -e GITHUB_OAUTH_CLIENT_ID="${{ secrets.GH_OAUTH_CLIENT_ID }}" \
+            -e GITHUB_OAUTH_CLIENT_SECRET="${{ secrets.GH_OAUTH_CLIENT_SECRET }}" \
+            -e GITHUB_OAUTH_REDIRECT_URI="${{ secrets.GH_OAUTH_REDIRECT_URI }}" \
+            -e KEY_VAULT_URI="${{ secrets.KEY_VAULT_URI }}" \
+            -e KEY_VAULT_CLIENT_ID="$KV_CLIENT_ID" \
+            -e KEY_VAULT_CLIENT_SECRET="$KV_CLIENT_SECRET" \
+            -e KEY_VAULT_TENANT_ID="$KV_TENANT_ID" \
             team-activity-monitor:test \
             sh -c "alembic upgrade head && pytest"
 
@@ -92,17 +113,23 @@ jobs:
               APP_ENV=production \
               DATABASE_URL="${{ secrets.DATABASE_URL }}" \
               OPENROUTER_API_KEY="${{ secrets.OPENROUTER_API_KEY }}" \
-              JIRA_BASE_URL="${{ secrets.JIRA_BASE_URL }}" \
-              JIRA_PROJECT_KEY="${{ secrets.JIRA_PROJECT_KEY }}" \
-              JIRA_EMAIL="${{ secrets.JIRA_EMAIL }}" \
-              JIRA_API_TOKEN="${{ secrets.JIRA_API_TOKEN }}" \
-              GITHUB_TOKEN="${{ secrets.GH_INTEGRATION_TOKEN }}" \
-              GITHUB_REPO="${{ secrets.GH_INTEGRATION_REPO }}" \
               AZURE_TENANT_ID="${{ secrets.AZURE_TENANT_ID }}" \
               AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID }}" \
               AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET }}" \
               AZURE_REDIRECT_URI="${{ secrets.AZURE_REDIRECT_URI_PROD }}" \
+              JIRA_OAUTH_CLIENT_ID="${{ secrets.JIRA_OAUTH_CLIENT_ID }}" \
+              JIRA_OAUTH_CLIENT_SECRET="${{ secrets.JIRA_OAUTH_CLIENT_SECRET }}" \
+              JIRA_OAUTH_REDIRECT_URI="${{ secrets.JIRA_OAUTH_REDIRECT_URI_PROD }}" \
+              GITHUB_OAUTH_CLIENT_ID="${{ secrets.GH_OAUTH_CLIENT_ID_PROD }}" \
+              GITHUB_OAUTH_CLIENT_SECRET="${{ secrets.GH_OAUTH_CLIENT_SECRET_PROD }}" \
+              GITHUB_OAUTH_REDIRECT_URI="${{ secrets.GH_OAUTH_REDIRECT_URI_PROD }}" \
+              KEY_VAULT_URI="${{ secrets.KEY_VAULT_URI }}" \
               WEBSITES_PORT=8000
+          # Prod deliberately does NOT set KEY_VAULT_CLIENT_ID/_SECRET/_TENANT_ID - the
+          # deployed App Service authenticates to Key Vault via its own system-assigned
+          # Managed Identity (DefaultAzureCredential's fallback, already granted Key
+          # Vault Secrets Officer during provisioning), the same as local dev's az-login
+          # identity. Those three vars are a CI-only need (see the test job above).
 
       - name: Restart Web App
         run: |

@@ -1,0 +1,19 @@
+{#
+    One turn of the conversation. Expects a message-shaped context variable
+    named `message` with (per chat.md's MessageOut): `role`
+    ("user"|"assistant"|"system"), `content` (raw text with {{cite:ordinal:uuid}}
+    sentinels embedded), `citations` (list of ActivityItemOut-shaped
+    objects/dicts, list index + 1 == ordinal).
+
+    Shared between live SSE-driven rendering (one message at a time) and full
+    history replay (looped by the caller) - this fragment only ever renders a
+    single message.
+
+    Sentinel-to-pill resolution happens here via the `resolve_citations` Jinja2
+    filter (registered in app/templating.py), not pre-resolved in Python by the
+    caller - see this handoff's log entry for the reasoning.
+#}
+<div class="chat-bubble chat-bubble--{{ message.role }}">
+    <div class="chat-bubble__role">{{ message.role }}</div>
+    <div class="chat-bubble__content">{{ message.content|resolve_citations(message.citations) }}</div>
+</div>

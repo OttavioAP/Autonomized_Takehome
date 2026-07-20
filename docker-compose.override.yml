@@ -1,0 +1,11 @@
+# Auto-merged by `docker compose` locally (not used by CI/deploy, which build the plain
+# Dockerfile directly - see .github/workflows/deploy.yml). Builds Dockerfile.dev instead
+# of Dockerfile so the fastapi container has the Azure CLI available, and bind-mounts the
+# developer's own `az login` credential cache into it - see Dockerfile.dev's header
+# comment for why this is needed for Key Vault access to work locally at all.
+services:
+  fastapi:
+    build:
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ${HOME}/.azure:/home/appuser/.azure

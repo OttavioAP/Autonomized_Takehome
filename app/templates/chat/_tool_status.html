@@ -1,0 +1,7 @@
+{#
+    Transient status line fragment for `tool-status` SSE events. Expects
+    `message` (str, e.g. "Checking Sarah's JIRA tickets…") - per chat.md's
+    ToolStatusEvent. Replaced (not accumulated) once real prose starts;
+    never persisted.
+#}
+<p class="tool-status">{{ message }}</p>
