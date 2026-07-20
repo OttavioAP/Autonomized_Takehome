@@ -116,12 +116,14 @@
                 github_pr: ["github", "PR"],
                 github_comment: ["github", "GitHub comment"],
             }[item.kind] || ["github", ""];
+            const text = (meta[1] ? meta[1] + ": " : "") + item.label;
             const a = document.createElement("a");
             a.className = "activity-pill activity-pill--" + meta[0];
             a.href = item.url;
             a.target = "_blank";
             a.rel = "noopener noreferrer";
-            a.textContent = (meta[1] ? meta[1] + ": " : "") + item.label;
+            a.title = text;
+            a.textContent = text;
             return a;
         }
 

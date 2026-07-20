@@ -96,17 +96,25 @@ async def test_get_repo_contributors_returns_seeded_contributor() -> None:
     assert any(c.login == "Autonomized1" for c in contributors)
 
 
-async def test_get_pr_reviews_on_pr_with_no_reviews_returns_empty() -> None:
+async def test_get_pr_reviews_on_seeded_pr_returns_the_seeded_review() -> None:
+    # PR #1 (utils/github_seed_data.py) has a real APPROVE review from John - was
+    # originally a "PR with no reviews" fixture before that seed data existed;
+    # asserting a live, growing dataset stays empty is inherently fragile, so this
+    # asserts the real known content instead.
     client = build_client(_github_token())
     async with client:
         reviews = await get_pr_reviews(client, REPO, 1)
 
-    assert reviews == []
+    assert any(r.state == "APPROVED" and r.author_login == "Autonomized1" for r in reviews)
 
 
-async def test_get_issue_comments_on_pr_with_no_comments_returns_empty() -> None:
+async def test_get_issue_comments_on_seeded_pr_returns_the_seeded_comment() -> None:
+    # Same PR #1 - utils/github_seed_data.py adds a real comment from Sarah's account.
     client = build_client(_github_token())
     async with client:
         comments = await get_issue_comments(client, REPO, 1)
 
-    assert comments == []
+    assert any(
+        c.author_login == "autonomized2" and "unblocks the rest of Phase 3" in c.body
+        for c in comments
+    )

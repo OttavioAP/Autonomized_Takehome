@@ -24,6 +24,17 @@
     list-style: none;
 }
 
+/* Pico's default button sizing assumes normal document flow, not a 52px-tall
+   flex navbar - its padding/line-height made "Sign out" taller than the
+   navbar, clipping it at the top. Constrain nav buttons/links explicitly. */
+.app-navbar button,
+.app-navbar [role="button"] {
+    padding: 0.4rem 0.85rem;
+    font-size: 0.8rem;
+    line-height: 1.2;
+    margin: 0;
+}
+
 .app-navbar strong {
     font-family: var(--tam-mono);
     font-size: 0.8rem;
@@ -276,10 +287,15 @@
 
 /* Pills render inline within flowing message text, not as a trailing block.
    Monospace + underline + hover lift signal "clickable instrument reading",
-   consistent with the console direction's label typography. */
+   consistent with the console direction's label typography. Some labels are
+   long (a JIRA/GitHub comment snippet can run up to ~80 chars) - capped at
+   max-width with an ellipsis rather than left to overflow the bubble; the
+   full text is still available via the title attribute and, of course, by
+   following the link. */
 .activity-pill {
     display: inline-flex;
     align-items: center;
+    max-width: 16rem;
     padding: 0.05rem 0.5rem;
     margin: 0 0.15rem;
     border-radius: 4px;
@@ -290,6 +306,8 @@
     text-decoration-thickness: 1px;
     text-underline-offset: 2px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     vertical-align: baseline;
     cursor: pointer;
     border: 1px solid transparent;

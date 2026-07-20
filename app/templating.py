@@ -22,10 +22,11 @@ _UNRESOLVED_CITATION_DETAIL = "Couldn't resolve a citation the assistant made â€
 def _render_pill(kind: str, label: str, url: str) -> str:
     meta = _ACTIVITY_KIND_META.get(kind, {"css_class": "github", "prefix": ""})
     prefix = f"{escape(meta['prefix'])}: " if meta["prefix"] else ""
+    text = f"{prefix}{escape(label)}"
     return (
         f'<a class="activity-pill activity-pill--{meta["css_class"]}" '
-        f'href="{escape(url)}" target="_blank" rel="noopener noreferrer">'
-        f"{prefix}{escape(label)}</a>"
+        f'href="{escape(url)}" target="_blank" rel="noopener noreferrer" '
+        f'title="{text}">{text}</a>'
     )
 
 

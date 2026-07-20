@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.activity_item import ActivityItem
@@ -74,15 +75,42 @@ async def upsert(
     unique constraint (conversation_id, kind, external_id). Refreshes label/url/
     fetched_at on an existing row (a ticket's title can change between fetches) rather
     than leaving stale display text pointing at the same stable id. Caller commits.
+
+    Uses a real atomic INSERT ... ON CONFLICT DO UPDATE, not a check-then-insert
+    (get_by_natural_key then create) - the latter has a TOCTOU race between two
+    concurrent writers targeting the same natural key (a real, reachable case once
+    ChatService started running same-round tool calls concurrently, each against its
+    own session/transaction - two upserts for the same (conversation_id, kind,
+    external_id) can both see "not found" before either commits, then both attempt an
+    INSERT, and the second hits the unique constraint). Postgres's ON CONFLICT clause
+    makes the check-and-write one atomic statement instead.
     """
-    existing = await get_by_natural_key(session, conversation_id, kind, external_id)
-    if existing is not None:
-        existing.label = label
-        existing.url = url
-        existing.fetched_at = datetime.now(UTC)
-        await session.flush()
-        return existing
-    return await create(session, conversation_id, kind, external_id, label, url)
+    now = datetime.now(UTC)
+    stmt = (
+        pg_insert(ActivityItem)
+        .values(
+            conversation_id=conversation_id,
+            kind=kind,
+            external_id=external_id,
+            label=label,
+            url=url,
+            fetched_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=["conversation_id", "kind", "external_id"],
+            set_={"label": label, "url": url, "fetched_at": now},
+        )
+        .returning(ActivityItem)
+    )
+    result = await session.execute(stmt)
+    await session.flush()
+    row_id = result.scalar_one().id
+    # Re-fetch through the session identity map so the caller gets a fully-attached
+    # ORM instance (the RETURNING row from a Core insert() isn't session-tracked the
+    # same way an ORM-constructed object is).
+    item = await session.get(ActivityItem, row_id)
+    assert item is not None, f"just-upserted activity_items row {row_id} vanished"
+    return item
 
 
 async def delete(session: AsyncSession, activity_item_id: uuid.UUID) -> None:
