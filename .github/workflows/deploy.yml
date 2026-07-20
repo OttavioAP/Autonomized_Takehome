@@ -50,6 +50,14 @@ jobs:
         # principal (already used by the deploy job below, additionally granted Key Vault
         # Secrets Officer on the vault) is reused here rather than provisioning a second
         # identity just for this.
+        #
+        # scripts/seed.py runs before pytest because tests/test_team_members_seed.py
+        # needs the team_members table actually populated - this container has no
+        # persistent volume/prior `make seed` run behind it. tests/integrations/
+        # test_github_client.py also reads Autonomized_Test_1_Github_PAT (a demo
+        # account's PAT, not a real Settings field - see that file's _github_token())
+        # directly from the environment, which this container doesn't otherwise have
+        # since there's no .env file copied in.
         run: |
           AZURE_CREDS='${{ secrets.AZURE_CREDENTIALS }}'
           KV_CLIENT_ID="$(echo "$AZURE_CREDS" | python3 -c 'import json,sys; print(json.load(sys.stdin)["clientId"])')"
@@ -74,8 +82,9 @@ jobs:
             -e KEY_VAULT_CLIENT_ID="$KV_CLIENT_ID" \
             -e KEY_VAULT_CLIENT_SECRET="$KV_CLIENT_SECRET" \
             -e KEY_VAULT_TENANT_ID="$KV_TENANT_ID" \
+            -e Autonomized_Test_1_Github_PAT="${{ secrets.GH_DEMO_TEST1_PAT }}" \
             team-activity-monitor:test \
-            sh -c "alembic upgrade head && pytest"
+            sh -c "alembic upgrade head && python scripts/seed.py && pytest"
 
   deploy:
     needs: test
