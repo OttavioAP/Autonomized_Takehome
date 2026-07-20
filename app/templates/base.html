@@ -15,7 +15,7 @@
     <body>
         {% block navbar %}
         {% endblock navbar %}
-        <main class="container">
+        <main class="container {% block main_class %}{% endblock main_class %}">
             {% block content %}
             {% endblock content %}
         </main>

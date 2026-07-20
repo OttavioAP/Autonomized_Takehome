@@ -71,14 +71,31 @@
     grid-template-columns: 15rem 1fr;
     gap: 0;
     align-items: start;
-    /* Fills the viewport below the navbar so the chat log's own scroll region
-       (not the page body) is what grows/scrolls as messages accumulate. */
-    height: calc(100vh - 52px);
-    margin: 0 calc(-1 * var(--pico-spacing, 1rem));
+    /* Fills whatever height main.chat-page (theme.css) hands it via flex,
+       rather than computing the viewport itself - correct at any screen size
+       without hardcoding the navbar's height or Pico's container padding. */
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
 }
 
 .chat-layout.sidebar-collapsed {
     grid-template-columns: 0 1fr;
+}
+
+@media (max-width: 640px) {
+    .chat-layout {
+        grid-template-columns: min(80vw, 15rem) 1fr;
+    }
+
+    .chat-layout.sidebar-collapsed {
+        grid-template-columns: 0 1fr;
+    }
+
+    .chat-main {
+        padding: 0 1rem;
+    }
 }
 
 .conversations-sidebar {
@@ -151,6 +168,7 @@
     flex-direction: column;
     height: 100%;
     min-height: 0;
+    min-width: 0;
     padding: 0 1.5rem;
 }
 
@@ -175,11 +193,12 @@
 
 /* ---------- Bubbles ---------- */
 .chat-bubble {
-    max-width: 68ch;
+    max-width: min(68ch, 100%);
     padding: 0.75rem 0.95rem;
     border-radius: var(--tam-radius);
     background: var(--tam-surface);
     border: 1px solid var(--tam-line);
+    overflow-wrap: break-word;
 }
 
 .chat-bubble--user {

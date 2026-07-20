@@ -53,8 +53,35 @@
     --pico-border-radius: var(--tam-radius);
 }
 
+html,
+body {
+    height: 100%;
+}
+
 body {
     background: var(--tam-bg);
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+}
+
+/* Pages whose <main> needs to fill the remaining viewport height exactly (the
+   chat page's own scroll region depends on this) opt in via .chat-page rather
+   than every page paying for it - most pages (login, oauth-connect) just want
+   normal document flow. Cancels Pico's .container horizontal padding too,
+   since the chat layout manages its own gutters (navbar/sidebar/composer)
+   instead of inheriting Pico's fluid breakpoint padding, which was the root
+   cause of the layout overflowing narrower viewports (a hardcoded
+   negative-margin trick tried to compensate for that padding and didn't
+   track it correctly at every breakpoint). */
+main.container.chat-page {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    margin: 0;
 }
 
 /* ---------- Shared wordmark (navbar + centered auth screens) ---------- */
