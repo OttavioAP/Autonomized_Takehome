@@ -1336,3 +1336,49 @@ serve).
 
 Not yet re-deployed as of this entry — the fix will take effect on the next push to
 `main`, at which point prod's `team_members` table should populate for the first time.
+
+## Post-deploy incident #2: production Internal Server Error on real login (Managed Identity vs. AZURE_CLIENT_ID collision)
+
+Reported by the user after the prior seed fix deployed: real login now failed with a
+plain 500, not the earlier "No team member record" error - progress, but a new,
+different real bug.
+
+**Root cause, found via App Service log download** (`az webapp log download`, unzipped
+with Python's `zipfile` since the container has no `unzip`; `az webapp log tail`
+hung/timed out, `log download` worked cleanly): `token_store._credential()`'s
+`DefaultAzureCredential(exclude_environment_credential=True)` call, hit while checking
+`both_connected()`'s JIRA Key Vault secret during the post-login gate. The actual
+exception: `ManagedIdentityCredential: No User Assigned or Delegated Managed Identity
+found for specified ClientId`. Confirmed via `az webapp identity show` that a real
+system-assigned identity *does* exist and is correctly provisioned - the bug wasn't
+missing infrastructure, it was credential resolution reading the wrong signal.
+`DefaultAzureCredential.__init__` defaults `managed_identity_client_id` to
+`os.environ["AZURE_CLIENT_ID"]` whenever that kwarg isn't explicitly passed - and this
+app's `AZURE_CLIENT_ID` app setting is the *Azure AD SSO app registration's* client id
+(`app/auth/oidc.py`'s login flow, an entirely unrelated app), not a real user-assigned
+managed identity. So `ManagedIdentityCredential` searched for a user-assigned identity
+matching the SSO app's client id, found none (correctly - it doesn't exist), and threw,
+instead of ever falling back to the real system-assigned identity that's actually
+role-assigned on the Key Vault.
+
+This same `AZURE_CLIENT_ID` double-duty was already known and partially handled -
+`_credential()`'s existing `exclude_environment_credential=True` exists specifically
+because `EnvironmentCredential` would otherwise also misuse `AZURE_CLIENT_ID`/`_SECRET`
+this way (see this file's OAuth-era design notes and `token_store.py`'s own comments).
+What wasn't caught until this incident: `ManagedIdentityCredential`'s client-id
+targeting reads the *same* env var through a *different* code path
+(`managed_identity_client_id`, not `EnvironmentCredential`), which
+`exclude_environment_credential` does nothing to suppress.
+
+**Fixed**: `_credential()` now passes `managed_identity_client_id=None` explicitly to
+`DefaultAzureCredential` (confirmed via reading the SDK's actual `__init__` source
+that `kwargs.pop("managed_identity_client_id", os.environ.get(...))` only falls back
+to the env var when the kwarg is *entirely absent* - an explicit `None` satisfies the
+pop and forces system-assigned resolution). Verified locally that the code path still
+constructs and a real Key Vault call succeeds with no auth error - though this specific
+bug could only ever manifest in real Azure App Service (`AppServiceCredential`, the
+Managed Identity flavor actually invoked there) and not local dev's `az login`-based
+`AzureCliCredential` fallback, which explains why this was invisible in every local
+test run and only surfaced against the real deployed infrastructure.
+
+Not yet re-deployed as of this entry.

@@ -2,6 +2,10 @@
 
 Most recent entry at the top. One entry per meaningful change — new/updated requirements, architecture decisions, or implementation milestones.
 
+## 2026-07-20 (Fix: production 500 on login - AZURE_CLIENT_ID hijacking Managed Identity resolution)
+
+- Second real production incident found via live testing (after the seed fix above unblocked login): every authenticated request hit a plain Internal Server Error. Root cause via App Service log download: `token_store._credential()`'s `DefaultAzureCredential` defaults `managed_identity_client_id` to `os.environ["AZURE_CLIENT_ID"]` when that kwarg isn't passed - and this app's `AZURE_CLIENT_ID` setting is the unrelated Azure AD SSO app registration's client id, not a real user-assigned managed identity. `ManagedIdentityCredential` searched for a user-assigned identity matching that id, found none, and raised - even though the correct system-assigned identity was provisioned and role-assigned the whole time (confirmed via `az webapp identity show`). Fixed by passing `managed_identity_client_id=None` explicitly, which suppresses the env-var fallback and forces system-assigned resolution.
+
 ## 2026-07-20 (Fix: production `team_members` never seeded, blocking every real login)
 
 - Real production incident, caught by the user testing the live deployed site: Azure AD SSO login succeeded but every page returned `{"detail":"No team member record for this account"}"`. Root cause: `deploy.yml` only ever seeded a throwaway CI Postgres container (to satisfy `tests/test_team_members_seed.py`), never the real Azure Postgres Flexible Server behind prod — same class of gap as this project's earlier documented "migrations never ran against prod" bug, and the same fix applies: `python scripts/seed.py` now runs in `entrypoint.sh` on every container boot (right after `alembic upgrade head`), since Postgres Flexible Server's firewall only allows Azure-internal traffic, no path for a GitHub-hosted CI runner to reach it directly.

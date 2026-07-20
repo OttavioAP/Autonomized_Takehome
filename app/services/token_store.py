@@ -82,7 +82,24 @@ def _credential() -> AsyncTokenCredential:
     # _TENANT_ID (see above) before ever reaching Managed Identity (prod) / the
     # az-login identity (local dev), which are the credentials that actually have a
     # Key Vault role assignment - the SSO app has none and every call would 403.
-    return DefaultAzureCredential(exclude_environment_credential=True)
+    #
+    # managed_identity_client_id=None (explicit, not omitted): DefaultAzureCredential
+    # defaults this to os.environ["AZURE_CLIENT_ID"] when the kwarg isn't passed at
+    # all - and AZURE_CLIENT_ID in this App Service's env is the SSO app registration's
+    # client ID (an unrelated app, see above), not a real user-assigned managed
+    # identity. That made ManagedIdentityCredential search for a user-assigned
+    # identity with that client ID, find none, and raise
+    # "No User Assigned or Delegated Managed Identity found for specified ClientId"
+    # (a real production 500, confirmed live via App Service logs) - even though the
+    # correct system-assigned identity was provisioned and role-assigned the whole
+    # time. Passing None explicitly here (not omitting the kwarg) is what actually
+    # suppresses that env-var fallback (DefaultAzureCredential's __init__ uses
+    # kwargs.pop("managed_identity_client_id", os.environ.get(...)) - an explicit
+    # None satisfies kwargs.pop and short-circuits the os.environ.get default),
+    # forcing ManagedIdentityCredential back to system-assigned resolution.
+    return DefaultAzureCredential(
+        exclude_environment_credential=True, managed_identity_client_id=None
+    )
 
 
 def _client() -> SecretClient:

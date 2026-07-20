@@ -283,6 +283,20 @@ provisioned via `scripts/azure/provision.sh` alongside the existing
 Postgres/App Service/ACR resources, plus the Managed Identity role
 assignment.
 
+**Real production incident, found post-deploy**: `AZURE_CLIENT_ID` is set in App
+Service config for the *Azure AD SSO app registration* (`app/auth/oidc.py`'s login
+flow, unrelated to Key Vault) — but `azure-identity`'s `DefaultAzureCredential`
+defaults its `managed_identity_client_id` kwarg to that same env var whenever the
+kwarg isn't explicitly passed, causing `ManagedIdentityCredential` to search for a
+*user-assigned* identity matching the SSO app's client id instead of falling back to
+the real system-assigned identity that's actually role-assigned on the vault — a
+real production 500 on every authenticated request, invisible in local dev (the
+`az login`-based `AzureCliCredential` fallback never hits this code path the same
+way). Fixed in `token_store._credential()` by passing `managed_identity_client_id=None`
+explicitly. `exclude_environment_credential=True` (already present, for a related but
+distinct reason — see that function's own comments) does NOT suppress this; it only
+stops `EnvironmentCredential` itself from misusing the same var.
+
 ## Connect/disconnect UI + routes (`app/api/oauth.py`, new)
 
 Mirrors the shape of `app/api/auth.py`'s Azure flow (login → redirect →
