@@ -2,6 +2,11 @@
 
 Most recent entry at the top. One entry per meaningful change — new/updated requirements, architecture decisions, or implementation milestones.
 
+## 2026-07-20 (Fix: production `team_members` never seeded, blocking every real login)
+
+- Real production incident, caught by the user testing the live deployed site: Azure AD SSO login succeeded but every page returned `{"detail":"No team member record for this account"}"`. Root cause: `deploy.yml` only ever seeded a throwaway CI Postgres container (to satisfy `tests/test_team_members_seed.py`), never the real Azure Postgres Flexible Server behind prod — same class of gap as this project's earlier documented "migrations never ran against prod" bug, and the same fix applies: `python scripts/seed.py` now runs in `entrypoint.sh` on every container boot (right after `alembic upgrade head`), since Postgres Flexible Server's firewall only allows Azure-internal traffic, no path for a GitHub-hosted CI runner to reach it directly.
+- `scripts/seed.py` made idempotent (`INSERT ... ON CONFLICT DO NOTHING` on each seeded table's natural key) before wiring it into unconditional every-boot execution — it previously used a plain `INSERT`, which would have thrown `UniqueViolation` and crashed the container on every restart after the first successful seed.
+
 ## 2026-07-20 (Phase 3 finished + expanded, Phase 5 complete: `ChatService`, conversation routes, live chat)
 
 - Finished Phase 3 with a deliberately expanded scope (agreed with the user, not scope creep): real scope discovery (`pre_fetch.discover_scope` — `search_projects`/`search_assignable_users` for JIRA, `get_user_repos`/`get_repo_contributors` for GitHub, all live-verified), plus JIRA/GitHub comments as two new citable `ActivityKind`s (`jira_comment`/`github_comment`), PR review decisions and JIRA priority/issue-type folded into pill labels as enrichment, and date-bounded fetches (`Settings.activity_lookback_days`, default 14) closing the "this week" query gap `chat.md` had flagged as unsolved. `JiraToolParams` now accepts either `jira_account_email` or a discovered `account_id` (JIRA's assignable-users search frequently returns no email at all for non-owner accounts — confirmed live).

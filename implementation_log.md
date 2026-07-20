@@ -1305,3 +1305,34 @@ dated entry for the tracker-level summary.
 
 Not yet committed/pushed/deploy-verified as of this entry — that's the final step of
 this same work item, done once this entry itself is written.
+
+## Post-deploy incident: production team_members never seeded
+
+Reported by the user testing the live deployed site in an incognito browser: logging
+in with John's real Azure AD credentials succeeded (SSO itself worked), but every
+subsequent page hit `{"detail":"No team member record for this account"}`.
+
+**Root cause**: `deploy.yml`'s `test` job runs `scripts/seed.py` inside a throwaway CI
+Postgres container to satisfy `tests/test_team_members_seed.py` — but the `deploy` job
+never ran it against the real Azure Postgres Flexible Server `DATABASE_URL`. Migrations
+avoid this exact trap already (see this file's OAuth-era "Bug #3" entry — Postgres
+Flexible Server's firewall only allows Azure-internal traffic, so `alembic upgrade
+head` moved into `entrypoint.sh` to run from wherever the app container itself boots,
+not from the GitHub Actions runner). Seeding needed the identical fix and never got it
+— `team_members` existed as an empty table in prod (the migration ran fine on every
+deploy) with zero rows, so no Azure UPN could ever resolve to a team member.
+
+**Fixed the same way Bug #3 was fixed**: `python scripts/seed.py` added to
+`entrypoint.sh` right after `alembic upgrade head`, so it runs from inside Azure's
+network on every container boot, local and deployed alike — no CI-runner network path
+to reason about. Made `scripts/seed.py` itself idempotent first (`INSERT ... ON
+CONFLICT DO NOTHING` keyed on each table's natural key, `azure_upn` for
+`team_members`) since running it unconditionally on every single boot means it has to
+be a safe no-op once the rows already exist, not just safe to run once. Verified
+locally: idempotent re-run against an already-seeded local `team_members` table prints
+"Seeded 0 new row(s)" with no error; a full local `docker compose restart` confirms the
+new step runs cleanly as part of normal startup, in the right order (migrate → seed →
+serve).
+
+Not yet re-deployed as of this entry — the fix will take effect on the next push to
+`main`, at which point prod's `team_members` table should populate for the first time.
