@@ -38,6 +38,84 @@ Also read, in this order:
    the codebase; confirm what's actually there before assuming a spec's
    description of "existing" code is still accurate.
 
+## Best practices (standing rules, every phase)
+
+These apply across all 9 phases, not just one — hold yourself to them
+consistently rather than picking them up partway through.
+
+- **Pydantic `BaseModel` for every data shape, not plain dataclasses or bare
+  dicts.** Every one of the three specs already does this by design (`ChatMessage`,
+  `ToolDefinition`, `ToolCall`, `ActivityItem`, `JiraProjectRef`, every SSE
+  event payload) — keep it consistent for anything new you introduce that
+  isn't explicitly speccéd as something else. This is also *how* MVP-NFR-4
+  (input/output validation) actually gets enforced throughout the codebase,
+  not just at the two or three boundaries the specs call out by name — a
+  plain dataclass or dict silently opts a data shape out of that validation.
+- **Three-tier route → service → repository separation, strictly.** Already
+  a binding invariant in `CLAUDE.md` (routes own the DB transaction; services
+  and repositories are plain functions taking `session: AsyncSession`
+  explicitly, no `Depends()`, no FastAPI imports) — restated here because the
+  chat feature is by far the largest amount of new route/service/repository
+  code this project has seen, and it's the phase most likely to accumulate a
+  shortcut (a repository sneaking in a commit, a service reaching for
+  `Depends()`) if you're moving fast. Don't take that shortcut anywhere.
+- **Comment the WHY, liberally — not the WHAT.** `CLAUDE.md`'s general rule
+  (default to no comments; add one only when the WHY is genuinely non-obvious)
+  still holds — this isn't a license to narrate every line. But be generous,
+  not sparing, about writing that non-obvious-WHY comment wherever one is
+  earned: a hidden constraint from a provider's API (e.g. why tool-call
+  argument fragments have to be accumulated across streaming deltas before
+  parsing), a subtle invariant the code depends on (e.g. why pre-fetch reuses
+  the stored `jira_cloud_id` instead of re-resolving it), a deliberate
+  tradeoff a future reader could easily "fix" back into a bug (e.g. why tool
+  messages are never persisted). If you had to think hard about *why*
+  something is the way it is while implementing it, that's exactly the
+  comment worth leaving for whoever reads it next.
+- **Errors are loud, never silent.** No bare `except:`, no swallowed
+  exception, no fallback-to-empty-and-move-on. Every error path is a
+  deliberate choice: a typed exception caught explicitly and turned into
+  something (a `ToolExecutionError` fed back to the model, an `error` SSE
+  event, a re-raise), never a silent pass-through that hides a real failure
+  behind an empty or default-looking result. This isn't a new rule — it's
+  `chat.md`'s "no silent failures anywhere in this design" principle, stated
+  as a general practice rather than scoped to just the chat feature's own
+  error classes.
+- **All magic numbers live in `config.py`, not inline.** Any numeric
+  constant that isn't self-evidently fixed by an external contract (an HTTP
+  status code, a fixed field length in someone else's API) belongs in
+  `Settings` with a named field and a sensible default — `max_tool_call_rounds`,
+  `discovery_top_n`, the 8-hour session lifetime, timeout values, page sizes,
+  and anything similar you introduce. Don't hardcode a `5` or a `10` or a
+  `3600` somewhere in service code where a future reader has to go hunting
+  for what it means or where else it's duplicated.
+- **No unrequested abstractions.** Don't add config knobs, plugin/strategy
+  patterns, generalized indirection, or "just in case" flexibility beyond
+  what the three specs actually call for. If a spec describes one concrete
+  thing, build that one concrete thing — don't generalize it into a framework
+  because it seems like it might need to flex later. This mirrors `CLAUDE.md`'s
+  existing "don't design for hypothetical future requirements" rule; restated
+  here because a big multi-phase build like this one is exactly where that
+  temptation shows up hardest.
+- **Real integration tests against live APIs, never mocks.** Already the
+  project's established convention (`tests/integrations/` hits real JIRA/
+  GitHub/OpenRouter today, no mocking library in the dependency tree at all)
+  — keep it that way for the new OAuth/Key-Vault/tool-calling integration
+  surface too. Don't reach for `unittest.mock`/`pytest-mock` out of habit
+  because live-API tests feel slower or flakier; that tradeoff was already
+  made deliberately for this project.
+- **Idempotent, re-runnable provisioning.** Anything that touches Azure
+  infrastructure (Key Vault provisioning, the Managed Identity role
+  assignment) should be safe to run twice without erroring or duplicating
+  resources — matching the existing `scripts/azure/*.sh` pattern and
+  Alembic's own no-op-when-no-diff `revision` behavior. If you write a new
+  provisioning script, check for the resource's existence before creating it,
+  the same way `provision.sh` already does.
+- **Full type hints, `mypy` clean.** Every new function signature fully
+  typed (parameters and return type), no bare `Any` where a real type is
+  knowable, `mypy app/` passing before you consider a phase's gate met — this
+  is already true of the whole codebase today; don't be the phase that
+  introduces the first untyped function.
+
 ## Phase -1: review and question, before writing any code
 
 The three specs (`chat.md`, `oauth-integration.md`, `openrouter-integration.md`)
