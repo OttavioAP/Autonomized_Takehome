@@ -32,6 +32,14 @@ def build_authorize_url(tenant_id: str, client_id: str, redirect_uri: str, state
             "response_mode": "query",
             "scope": "openid profile email",
             "state": state,
+            # Without this, Azure AD silently reuses the browser's existing SSO
+            # session on every /auth/login - this app's own /auth/logout only ever
+            # revoked its own session/cookie, never Azure's, so "sign out" then
+            # "sign in as someone else" would silently re-authenticate as the same
+            # user with no prompt at all (only visible workaround: an incognito
+            # window). select_account forces Azure's account picker every time,
+            # without ending the underlying Azure SSO session for other apps/tabs.
+            "prompt": "select_account",
         }
     )
     return f"{authority(tenant_id)}/oauth2/v2.0/authorize?{params}"
