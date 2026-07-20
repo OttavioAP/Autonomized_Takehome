@@ -955,3 +955,85 @@ in this log, no regressions.
 atomic upsert is `ChatService`/Tools-layer work, later), no `MessageOut`-shaped citation-joined
 query in `message_repo` (blocked on `app/schemas/chat.py` not existing), no wiring into any
 route (none exist yet).
+
+## Phase 1: `app/api/oauth.py` — the connect/disconnect gate, closing out Phase 1
+
+Built the last piece of `oauth-integration.md`'s "Connect/disconnect UI + routes" section:
+`GET /oauth/connect` (renders `oauth_connect.html`, Connected/Not-connected per provider
+read live from Key Vault), `GET /oauth/{jira,github}/connect` (authorize-URL redirect +
+`oauth_state` cookie, mirroring `app/api/auth.py`'s existing Azure flow exactly),
+`GET /oauth/{jira,github}/callback` (state check, code exchange, store tokens,
+redirect back to `/oauth/connect`), `POST /oauth/{jira,github}/disconnect` (CSRF-protected,
+deletes that provider's secrets). Wired the gate into two places: `app/api/auth.py`'s
+`/auth/callback` (redirect to `/oauth/connect` instead of `/` if either provider is
+missing) and `app/api/pages.py`'s `GET /` (server-side enforcement — a user navigating
+straight to `/`, not just the post-login redirect path, must not reach a page assuming
+both providers are connected; `GET /conversations/{id}` will be the real eventual home
+for this check once Phase 5 builds it, `index.html` is the stand-in until then).
+
+**Real bug caught before it shipped**: `accessible-resources`' response has both `id`
+(cloud_id, builds the API base URL) and `url` (the site's real browse-URL host, e.g.
+`https://foo.atlassian.net`) — I initially only captured `id` and tried to derive a
+JIRA ticket's deep-link from the API base URL (`api.atlassian.com/ex/jira/{cloud_id}/
+browse/...`), which is not a real browsable URL, just the API host. Caught this while
+drafting `JiraTool` (Phase 3, stashed — see below) and needing a real citation
+deep-link. Fixed properly at the source: added `team_members.jira_site_url` (new
+column + migration, migration `b854487bcb15`), `team_member_repo.set_jira_cloud_id`
+now takes and stores both fields from one `accessible-resources` call, `oauth.py`'s
+JIRA callback passes both through. This was caught before any tool code shipped using
+the wrong URL — no production impact, but flagging the near-miss since it's the kind
+of bug that would have silently rendered every JIRA citation pill as a dead link.
+
+**Real bug found via the test suite, not by inspection — a genuine Key Vault
+eventual-consistency race, not just test flakiness**: `token_store.delete_jira_tokens`/
+`delete_github_token` already purge (not just soft-delete) on disconnect, per
+`oauth-integration.md`'s "gone now, not gone eventually" requirement. But Key Vault's
+backend purge doesn't complete fully synchronously even though `purge_deleted_secret`'s
+own coroutine returns — a `store_*_token` call immediately after a disconnect can hit
+`ResourceExistsError` ("currently being deleted, cannot be re-created; retry later").
+Hit this directly running the new `tests/test_oauth.py` (disconnect-then-reconnect
+tests against John's real seeded identity) — not a mocked/synthetic race, a real one
+against live infrastructure, confirmed twice on two different secret names. This is a
+real production concern too, not just test churn: a user could plausibly disconnect
+and immediately reconnect. Fixed with retry-with-backoff in `token_store._set_secret_
+with_retry` (1s/2s/4s delays, then raise) — Azure's own error message literally says
+"retry later," so this is the documented recovery path, not a workaround.
+
+**Also fixed while chasing this**: `tests/conftest.py`'s `authenticated_client` fixture
+originally stored fake JIRA/GitHub tokens for John on every test and deleted them in
+teardown — this is exactly the disconnect/reconnect-on-every-test pattern that triggers
+the race above, at high frequency, against a fixed identity. Changed to idempotent
+setup (only store if `get_jira_tokens`/`get_github_token` returns `None`) with no
+teardown at all, so repeat test runs are a no-op instead of delete/recreate churn. Also
+had to manually purge a batch of ~40 soft-deleted secrets that had accumulated in the
+vault from earlier sessions' repeated store/delete cycles during this debugging — all
+harmless (random UUID names, never collide with anything), but worth noting `az keyvault
+secret purge` in a loop timed out once against ~80 leftover secrets; a real cleanup
+pass on this vault before demo day is worth doing, not urgent.
+
+**Manual verification** (Phase 1's gate explicitly calls for a browser round-trip in
+addition to automated tests): drove the full connect/disconnect flow directly via curl
+against a real session (not the automated tests) before the user did their own real
+browser round-trip with actual Atlassian/GitHub consent screens — confirmed
+`GET /jira/connect`/`GET /github/connect` produce correctly-formed authorize URLs (real
+client IDs, correct scopes, correct redirect URIs, state params present), disconnect
+correctly flips `GET /` from 200 to a 302-to-gate redirect and back, `/oauth/connect`'s
+Connected/Not-connected state reads live Key Vault state correctly. User separately
+completed a real browser connect as John afterward (real Atlassian/GitHub consent
+screens) — those real tokens were purged at the user's request before the automated
+`tests/test_oauth.py` suite ran, to avoid the automated tests silently clobbering real
+verification data with fixture fakes.
+
+**Full suite**: 40 passed, 3 skipped (same pre-existing JIRA live-OAuth skips). ruff/
+djlint fully clean; mypy's only findings are the same 13 pre-existing `Settings()`
+call-arg false positives (confirmed unchanged), after fixing 4 new ones `_set_secret_
+with_retry`'s initial `**kwargs: object` signature introduced (too imprecise for
+`SecretClient.set_secret`'s real keyword-only params) — narrowed to the one keyword
+actually used (`expires_on: datetime | None`) instead.
+
+**Phase 3 work paused mid-flight per user request** (JiraTool/GithubTool, `app/schemas/
+chat.py`, `chat_errors.py`, `activity_item_repo.upsert`) — stashed (`git stash`, message
+"Phase 3 WIP: tools, schemas, activity_item_repo upsert") rather than committed, so
+Phase 1's commit stays a clean, single-phase unit per the handoff's "don't batch
+multiple phases into one commit" rule. Will resume from the stash once Phase 1's commit
+is confirmed deployed and green.

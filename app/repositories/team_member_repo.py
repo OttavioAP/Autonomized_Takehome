@@ -22,13 +22,14 @@ async def list_all(session: AsyncSession) -> list[TeamMember]:
 
 
 async def set_jira_cloud_id(
-    session: AsyncSession, team_member_id: uuid.UUID, cloud_id: str
+    session: AsyncSession, team_member_id: uuid.UUID, cloud_id: str, site_url: str
 ) -> None:
-    """Called once from GET /oauth/jira/callback after resolving the cloud id via
-    accessible-resources - not a secret, safe to keep in Postgres (see
+    """Called once from GET /oauth/jira/callback after resolving both fields via one
+    accessible-resources call - neither is a secret, safe to keep in Postgres (see
     oauth-integration.md's Token storage section). Caller commits.
     """
     team_member = await session.get(TeamMember, team_member_id)
     if team_member is None:
         raise ValueError(f"No team_members row for id={team_member_id}")
     team_member.jira_cloud_id = cloud_id
+    team_member.jira_site_url = site_url

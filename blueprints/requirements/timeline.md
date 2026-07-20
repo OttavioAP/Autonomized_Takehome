@@ -85,9 +85,18 @@ Each phase below ends with a **hard gate**: write tests for that phase's code (p
 - Delete `app/db/models/smoke_test.py` (already dead — not imported, not on `Base.metadata`, its table already dropped by an earlier migration; done as part of this review, not left for the implementing agent).
 - Gate: no tests to write (pure deletion); run the existing suite to confirm nothing broke, commit, push, confirm deploy green before Phase 1.
 
-### Phase 1 — JIRA/GitHub OAuth (`oauth-integration.md`)
+### Phase 1 — JIRA/GitHub OAuth (`oauth-integration.md`) — ✅ complete
 
-Everything else depends on this — no tool can execute without a real per-user token. Build in this order within the phase:
+All 6 steps below done, gate passed: `make test` green (40 passed, 3 skipped — the skips
+are `test_jira_client.py`'s live-data tests, blocked on a real JIRA OAuth access token,
+which self-unskip via `JIRA_TEST_*` env vars once one exists), ruff/mypy/djlint clean, a
+real manual browser round-trip completed (connect JIRA + GitHub against real consent
+screens, confirm the gate blocks entry until both connected, confirm sign-out/sign-in
+doesn't require reconnecting, confirm disconnect works), deployed and confirmed green in
+CI (`deploy.yml`, two iterations — first run caught two real CI-only gaps: seed data
+never loaded before `pytest`, and a demo GitHub PAT needed for one test wasn't available
+in the container; both fixed, see `implementation_log.md`). Everything else depends on
+this — no tool can execute without a real per-user token. Built in this order:
 0. **`team_members` table only** (pulled forward from Phase 2 — see the note below this list) — the model, one Alembic migration, and `local-dev-data/team_members.json` wired into `scripts/seed.py` as its seed source. The rest of Phase 2's schema (`conversations`/`messages`/`activity_items`/`message_citations`) has no OAuth dependency and stays in Phase 2.
 1. Azure Key Vault provisioning (`scripts/azure/provision.sh` extended) + Managed Identity role assignment, plus granting the developer's own `az login` identity the same access (local dev uses the real Key Vault, no fallback — see `oauth-integration.md`'s Isolation model / Token storage sections).
 2. JIRA 3LO app registration + GitHub OAuth App registration (external, via each provider's console — same pattern as the Azure AD app registration already done).

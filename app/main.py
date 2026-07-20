@@ -5,7 +5,7 @@ from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, pages
+from app.api import auth, oauth, pages
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -15,6 +15,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 app.include_router(pages.router)
 app.include_router(auth.router)
+app.include_router(oauth.router)
 
 
 @app.exception_handler(HTTPException)

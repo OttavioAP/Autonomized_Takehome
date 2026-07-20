@@ -10,6 +10,8 @@ from app.auth.dependency import SESSION_COOKIE_NAME
 from app.db.models.session import UserSession
 from app.db.session import db
 from app.main import app
+from app.repositories import team_member_repo
+from app.services import token_store
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +48,25 @@ async def authenticated_client(client: AsyncClient) -> AsyncGenerator[AsyncClien
     async for db_session in db.get_session():
         db_session.add(session)
         await db_session.commit()
+        team_member = await team_member_repo.get_by_azure_upn(db_session, session.user_upn)
+
+    # This fixture represents a fully onboarded user, not just a logged-in one - most
+    # tests using it exercise post-login behavior (logout, page rendering) that assumes
+    # past the /oauth/connect gate, not the gate itself. Real Key Vault writes (this repo
+    # has no mocking). Deliberately NOT deleted in teardown: Key Vault's soft-delete ->
+    # purge cycle has its own backend-side eventual-consistency window (a purge doesn't
+    # complete synchronously even though purge_deleted_secret's coroutine returns), so a
+    # delete-then-recreate cycle on every single test run races real infrastructure state
+    # - hit this directly as a flaky "currently being deleted, cannot be re-created"
+    # error. Idempotent instead: only store if not already connected, so repeat runs are
+    # a no-op rather than delete/recreate churn.
+    assert team_member is not None, "seed data must include john@... (local-dev-data)"
+    if await token_store.get_jira_tokens(team_member.id) is None:
+        await token_store.store_jira_tokens(
+            team_member.id, "test-access-token", "test-refresh-token"
+        )
+    if await token_store.get_github_token(team_member.id) is None:
+        await token_store.store_github_token(team_member.id, "test-github-token")
 
     client.cookies.set(SESSION_COOKIE_NAME, str(session.id))
     yield client

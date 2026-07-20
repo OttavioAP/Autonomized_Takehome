@@ -18,3 +18,8 @@ class TeamMember(Base):
     # by pre-fetch so it's never re-derived on every tool call. NULL until the user
     # connects JIRA (see oauth-integration.md's Token storage / Connect prompt sections).
     jira_cloud_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The site's real browse URL (e.g. https://foo.atlassian.net), also from
+    # accessible-resources - distinct from jira_cloud_id, which only builds the API base
+    # URL (api.atlassian.com/ex/jira/{cloud_id}/...). Needed to build activity_items.url
+    # deep-links for JIRA tickets, which the API base URL can't produce.
+    jira_site_url: Mapped[str | None] = mapped_column(String, nullable=True)

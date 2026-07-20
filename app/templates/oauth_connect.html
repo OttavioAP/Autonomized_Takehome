@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Connect your accounts{% endblock title %}
+{% block content %}
+    <article>
+        <hgroup>
+            <h1>Connect your accounts</h1>
+            <p>Both JIRA and GitHub need to be connected before you can chat.</p>
+        </hgroup>
+        <div class="oauth-connect-row">
+            <span>JIRA</span>
+            {% if jira_connected %}
+                <span class="oauth-status oauth-status--connected">Connected</span>
+                <form method="post" action="{{ url_for('jira_disconnect') }}">
+                    <input type="hidden" name="csrf_token" value="{{ current_user.csrf_token }}" />
+                    <button type="submit" class="secondary">Disconnect</button>
+                </form>
+            {% else %}
+                <span class="oauth-status oauth-status--not-connected">Not connected</span>
+                <a href="{{ url_for('jira_connect') }}" role="button">Connect JIRA</a>
+            {% endif %}
+        </div>
+        <div class="oauth-connect-row">
+            <span>GitHub</span>
+            {% if github_connected %}
+                <span class="oauth-status oauth-status--connected">Connected</span>
+                <form method="post" action="{{ url_for('github_disconnect') }}">
+                    <input type="hidden" name="csrf_token" value="{{ current_user.csrf_token }}" />
+                    <button type="submit" class="secondary">Disconnect</button>
+                </form>
+            {% else %}
+                <span class="oauth-status oauth-status--not-connected">Not connected</span>
+                <a href="{{ url_for('github_connect') }}" role="button">Connect GitHub</a>
+            {% endif %}
+        </div>
+        {% if jira_connected and github_connected %}
+            <a href="{{ url_for('index') }}" role="button">Continue</a>
+        {% endif %}
+    </article>
+{% endblock content %}

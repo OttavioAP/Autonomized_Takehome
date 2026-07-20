@@ -8,11 +8,13 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import oauth as oauth_routes
 from app.auth import oidc
 from app.auth.dependency import SESSION_COOKIE_NAME, get_current_user
 from app.config import get_settings
 from app.db.models.session import UserSession
 from app.db.session import db
+from app.repositories import team_member_repo
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -86,7 +88,18 @@ async def callback(
     db_session.add(session)
     await db_session.commit()
 
-    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    # oauth-integration.md's Connect prompt: only route through /oauth/connect if this
+    # user is missing a JIRA/GitHub connection (first login ever, or after a disconnect/
+    # revocation) - a returning user with both already connected goes straight to /,
+    # since connections now persist across logins.
+    redirect_target = "/"
+    team_member = await team_member_repo.get_by_azure_upn(db_session, session.user_upn)
+    if team_member is not None and not await oauth_routes.both_connected(
+        db_session, team_member.id
+    ):
+        redirect_target = "/oauth/connect"
+
+    response = RedirectResponse(url=redirect_target, status_code=status.HTTP_302_FOUND)
     response.set_cookie(
         SESSION_COOKIE_NAME,
         str(session.id),
