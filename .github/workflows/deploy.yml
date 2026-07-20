@@ -57,7 +57,11 @@ jobs:
         # test_github_client.py also reads Autonomized_Test_1_Github_PAT (a demo
         # account's PAT, not a real Settings field - see that file's _github_token())
         # directly from the environment, which this container doesn't otherwise have
-        # since there's no .env file copied in.
+        # since there's no .env file copied in. Same reasoning for
+        # Autonomized_Test_1_Protonmail_Email/Autonomized_Test_1_Jira_API_Key, read by
+        # tests/integrations/test_jira_client.py's _basic_auth_client() (Phase 3's
+        # live discovery/comments tests, Basic-auth against JIRA's direct site URL -
+        # not the OAuth Bearer path, which stays blocked on a real 3LO token).
         run: |
           AZURE_CREDS='${{ secrets.AZURE_CREDENTIALS }}'
           KV_CLIENT_ID="$(echo "$AZURE_CREDS" | python3 -c 'import json,sys; print(json.load(sys.stdin)["clientId"])')"
@@ -83,6 +87,8 @@ jobs:
             -e KEY_VAULT_CLIENT_SECRET="$KV_CLIENT_SECRET" \
             -e KEY_VAULT_TENANT_ID="$KV_TENANT_ID" \
             -e Autonomized_Test_1_Github_PAT="${{ secrets.GH_DEMO_TEST1_PAT }}" \
+            -e Autonomized_Test_1_Protonmail_Email="${{ secrets.JIRA_DEMO_TEST1_EMAIL }}" \
+            -e Autonomized_Test_1_Jira_API_Key="${{ secrets.JIRA_DEMO_TEST1_API_KEY }}" \
             team-activity-monitor:test \
             sh -c "alembic upgrade head && python scripts/seed.py && pytest"
 

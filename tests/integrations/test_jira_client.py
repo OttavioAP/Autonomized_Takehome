@@ -61,13 +61,19 @@ def _load_env(path: Path) -> dict[str, str]:
 
 
 def _basic_auth_client() -> httpx.AsyncClient:
-    env = _load_env(REPO_ROOT / ".env")
+    # Same short-circuit pattern as test_github_client.py's _github_token(): only read
+    # .env (which doesn't exist in CI - real values come from injected env vars there)
+    # if the env var isn't already set. The original version of this function called
+    # _load_env unconditionally, crashing with FileNotFoundError in CI even when the
+    # env vars WERE set, since Python's `or` doesn't make the left-hand _load_env call
+    # itself lazy - only the fallback USE of its result was ever conditional.
     email = (
         os.environ.get("Autonomized_Test_1_Protonmail_Email")
-        or env["Autonomized_Test_1_Protonmail_Email"]
+        or _load_env(REPO_ROOT / ".env")["Autonomized_Test_1_Protonmail_Email"]
     )
     api_token = (
-        os.environ.get("Autonomized_Test_1_Jira_API_Key") or env["Autonomized_Test_1_Jira_API_Key"]
+        os.environ.get("Autonomized_Test_1_Jira_API_Key")
+        or _load_env(REPO_ROOT / ".env")["Autonomized_Test_1_Jira_API_Key"]
     )
     return httpx.AsyncClient(base_url=_JIRA_SITE_BASE_URL, auth=(email, api_token), timeout=10.0)
 
