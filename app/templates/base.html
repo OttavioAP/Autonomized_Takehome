@@ -6,6 +6,7 @@
         <title>{% block title %}Team Activity Monitor{% endblock title %}</title>
         <link rel="stylesheet"
               href="{{ url_for('static', path='vendor/pico.min.css') }}" />
+        <link rel="stylesheet" href="{{ url_for('static', path='css/theme.css') }}" />
         {% block extra_head %}
         {% endblock extra_head %}
         <script src="{{ url_for('static', path='vendor/htmx.min.js') }}" defer></script>

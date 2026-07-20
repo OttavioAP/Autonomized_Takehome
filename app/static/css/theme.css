@@ -1,0 +1,186 @@
+/* App-wide dark "console" theme — token overrides for Pico's CSS variables,
+   linked globally from base.html so every page (login, oauth-connect, chat)
+   shares one dark, amber-accented palette instead of chat.html looking like a
+   different product from the rest of the app. Chat-specific component styling
+   (navbar, sidebar, bubbles, pills) lives in chat.css and consumes these same
+   --tam-* tokens. */
+
+@font-face {
+    font-family: "JBMono";
+    src: local("JetBrains Mono"), local("Consolas"), local("Menlo");
+}
+
+:root {
+    --tam-bg: #0d1117;
+    --tam-surface: #151b23;
+    --tam-surface-raised: #1c2430;
+    --tam-line: #2a3340;
+    --tam-ink: #e6e9ef;
+    --tam-ink-dim: #8b96a5;
+    --tam-ink-faint: #5a6472;
+    --tam-accent: #e8a33d;
+    --tam-accent-ink: #1a1204;
+    --tam-jira: #6ea8ff;
+    --tam-jira-bg: #16233d;
+    --tam-github: #7ee0c3;
+    --tam-github-bg: #113129;
+    --tam-danger: #ff7b72;
+    --tam-radius: 6px;
+    --tam-mono: "JBMono", ui-monospace, "SF Mono", Consolas, monospace;
+
+    --pico-background-color: var(--tam-bg);
+    --pico-color: var(--tam-ink);
+    --pico-h1-color: var(--tam-ink);
+    --pico-card-background-color: var(--tam-surface);
+    --pico-card-border-color: var(--tam-line);
+    --pico-card-sectioning-background-color: var(--tam-surface);
+    --pico-muted-border-color: var(--tam-line);
+    --pico-muted-color: var(--tam-ink-dim);
+    --pico-primary: var(--tam-accent);
+    --pico-primary-background: var(--tam-accent);
+    --pico-primary-hover-background: #d4922f;
+    --pico-primary-inverse: var(--tam-accent-ink);
+    --pico-primary-focus: color-mix(in srgb, var(--tam-accent) 35%, transparent);
+    --pico-secondary: var(--tam-ink-dim);
+    --pico-secondary-background: var(--tam-surface-raised);
+    --pico-secondary-border: var(--tam-line);
+    --pico-secondary-hover-background: var(--tam-line);
+    --pico-secondary-hover: var(--tam-ink);
+    --pico-form-element-background-color: var(--tam-surface-raised);
+    --pico-form-element-border-color: var(--tam-line);
+    --pico-form-element-color: var(--tam-ink);
+    --pico-form-element-placeholder-color: var(--tam-ink-faint);
+    --pico-border-radius: var(--tam-radius);
+}
+
+body {
+    background: var(--tam-bg);
+}
+
+/* ---------- Shared wordmark (navbar + centered auth screens) ---------- */
+.wordmark {
+    font-family: var(--tam-mono);
+    font-size: 0.85rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--tam-ink);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.wordmark::before {
+    content: "";
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--tam-accent);
+    box-shadow: 0 0 8px 1px color-mix(in srgb, var(--tam-accent) 60%, transparent);
+}
+
+/* ---------- Centered auth screens (login, oauth-connect) ---------- */
+.auth-shell {
+    min-height: calc(100vh - 2rem);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 26rem;
+    background: var(--tam-surface);
+    border: 1px solid var(--tam-line);
+    border-radius: 10px;
+    padding: 2.5rem 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 1.4rem;
+}
+
+.auth-card h1 {
+    font-size: 1.3rem;
+    margin: 0;
+}
+
+.auth-card p.lede {
+    color: var(--tam-ink-dim);
+    font-size: 0.9rem;
+    line-height: 1.55;
+    margin: 0;
+    max-width: 30ch;
+}
+
+.auth-card [role="button"],
+.auth-card button {
+    width: 100%;
+}
+
+/* ---------- OAuth connect rows ---------- */
+.oauth-connect-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+    text-align: left;
+}
+
+.oauth-connect-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border: 1px solid var(--tam-line);
+    border-radius: var(--tam-radius);
+    padding: 0.85rem 1rem;
+    background: var(--tam-surface-raised);
+}
+
+.oauth-connect-row > span:first-child {
+    font-size: 0.9rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.oauth-connect-row [role="button"],
+.oauth-connect-row button {
+    font-size: 0.78rem;
+    padding: 0.4rem 0.75rem;
+    width: auto;
+}
+
+.oauth-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: var(--tam-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+}
+
+.oauth-status--connected {
+    color: var(--tam-github);
+    background: color-mix(in srgb, var(--tam-github) 15%, transparent);
+}
+
+.oauth-status--connected::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--tam-github);
+}
+
+.oauth-status--not-connected {
+    color: var(--tam-ink-faint);
+    background: var(--tam-surface);
+    border: 1px solid var(--tam-line);
+}

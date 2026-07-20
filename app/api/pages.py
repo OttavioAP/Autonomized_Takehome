@@ -5,17 +5,19 @@ the active conversation is carried in the URL path, not the session.
 """
 
 import json
+import logging
 import secrets
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import oauth as oauth_routes
 from app.auth.dependency import get_current_user
 from app.db.models.session import UserSession
+from app.db.models.team_member import TeamMember
 from app.db.session import db
 from app.repositories import conversation_repo, message_repo, team_member_repo
 from app.services import pre_fetch
@@ -23,6 +25,19 @@ from app.services.chat_service import ChatService
 from app.templating import templates
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+async def _run_pre_fetch_background(conversation_id: uuid.UUID, team_member: TeamMember) -> None:
+    """Fire-and-forget task body for the optimistic pre-fetch kicked off by
+    conversation_view() - never awaited by the request, so any exception here would
+    otherwise vanish silently into an unretrieved Task exception. Logged instead."""
+    async with db.new_session() as session:
+        try:
+            await pre_fetch.run(session, conversation_id, team_member)
+            await session.commit()
+        except Exception:
+            logger.exception("Background pre-fetch failed for conversation_id=%s", conversation_id)
 
 
 async def _require_team_member(db_session: AsyncSession, current_user: UserSession) -> uuid.UUID:
@@ -64,6 +79,7 @@ async def index(
 async def conversation_view(
     request: Request,
     conversation_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     current_user: UserSession = Depends(get_current_user),
     db_session: AsyncSession = Depends(db.get_session),
 ):
@@ -77,8 +93,18 @@ async def conversation_view(
     team_member = await team_member_repo.get_by_azure_upn(db_session, current_user.user_upn)
     assert team_member is not None
     if conversation.prefetched_at is None:
-        await pre_fetch.run(db_session, conversation_id, team_member)
-        await db_session.commit()
+        # Optimistic, non-blocking: the page renders immediately rather than waiting
+        # on live JIRA/GitHub round-trips. FastAPI's BackgroundTasks runs this after
+        # the response is sent, on the same event loop but outside the request scope -
+        # unlike a bare asyncio.create_task(), it isn't at risk of being cancelled the
+        # moment the response completes. Runs against its own session (not db_session,
+        # which belongs to a request scope this task outlives) and commits
+        # independently once done. ChatService.run() doesn't require prefetched_at to
+        # be set - it just reads whatever activity_items rows exist at chat time, so a
+        # user who sends a message before this finishes gets a thinner "own activity"
+        # context for that one turn at worst, not an error; the model can still
+        # tool-call to compensate.
+        background_tasks.add_task(_run_pre_fetch_background, conversation_id, team_member)
 
     messages = await message_repo.list_out_for_conversation(db_session, conversation_id)
     conversations = await conversation_repo.list_for_team_member(db_session, team_member_id)
