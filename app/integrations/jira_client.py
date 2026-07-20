@@ -15,6 +15,29 @@ class JiraIssue(BaseModel):
     status: str
     assignee_account_id: str | None
     updated: datetime
+    priority: str | None = None
+    issue_type: str | None = None
+
+
+class JiraComment(BaseModel):
+    id: str
+    issue_key: str
+    author_display_name: str | None
+    # Comment bodies are Atlassian Document Format (nested JSON), not plain text - callers
+    # get a best-effort plain-text extraction (see _extract_plain_text below), not the raw ADF.
+    body_text: str
+    created: datetime
+
+
+class JiraProject(BaseModel):
+    key: str
+    name: str
+
+
+class JiraAssignableUser(BaseModel):
+    account_id: str
+    display_name: str
+    email: str | None
 
 
 def build_client(access_token: str, cloud_id: str) -> httpx.AsyncClient:
@@ -28,23 +51,35 @@ def build_client(access_token: str, cloud_id: str) -> httpx.AsyncClient:
 def _parse_issue(raw: dict[str, Any]) -> JiraIssue:
     fields = raw["fields"]
     assignee = fields.get("assignee")
+    priority = fields.get("priority")
+    issue_type = fields.get("issuetype")
     return JiraIssue(
         key=raw["key"],
         summary=fields["summary"],
         status=fields["status"]["name"],
         assignee_account_id=assignee["accountId"] if assignee else None,
         updated=fields["updated"],
+        priority=priority["name"] if priority else None,
+        issue_type=issue_type["name"] if issue_type else None,
     )
 
 
 async def get_issues_assigned_to(
-    client: httpx.AsyncClient, project_key: str, account_id: str
+    client: httpx.AsyncClient, project_key: str, account_id: str, since_days: int | None = None
 ) -> list[JiraIssue]:
-    """MVP-FR-9: assigned issues plus status and recent updates for a user."""
-    jql = f'project={project_key} AND assignee="{account_id}" ORDER BY updated DESC'
+    """MVP-FR-9: assigned issues plus status and recent updates for a user.
+
+    since_days, when given, adds an `updated >= -Nd` JQL bound (Settings.
+    activity_lookback_days at the caller) - chat.md's known gap for "what's X been up to
+    this week"-style queries, closed here rather than left for the model to eyeball dates.
+    """
+    jql = f'project={project_key} AND assignee="{account_id}"'
+    if since_days is not None:
+        jql += f" AND updated >= -{since_days}d"
+    jql += " ORDER BY updated DESC"
     resp = await client.get(
         "/rest/api/3/search/jql",
-        params={"jql": jql, "fields": "summary,status,assignee,updated"},
+        params={"jql": jql, "fields": "summary,status,assignee,updated,priority,issuetype"},
     )
     resp.raise_for_status()
     return [_parse_issue(issue) for issue in resp.json()["issues"]]
@@ -55,6 +90,79 @@ async def find_account_id_by_email(client: httpx.AsyncClient, email: str) -> str
     resp.raise_for_status()
     results = resp.json()
     return results[0]["accountId"] if results else None
+
+
+def _extract_plain_text(adf_body: dict[str, Any]) -> str:
+    """Best-effort plain-text extraction from Atlassian Document Format - walks
+    content nodes, joining text leaves with the block structure collapsed. ADF is a
+    rich nested doc format (headings, lists, mentions, etc.); this project only needs
+    a readable snippet for the model to read/cite, not a faithful re-render.
+    """
+    parts: list[str] = []
+
+    def _walk(node: dict[str, Any]) -> None:
+        if node.get("type") == "text":
+            parts.append(node.get("text", ""))
+        for child in node.get("content") or []:
+            _walk(child)
+        if node.get("type") in ("paragraph", "heading"):
+            parts.append("\n")
+
+    _walk(adf_body)
+    return "".join(parts).strip()
+
+
+def _parse_comment(raw: dict[str, Any], issue_key: str) -> JiraComment:
+    author = raw.get("author")
+    return JiraComment(
+        id=raw["id"],
+        issue_key=issue_key,
+        author_display_name=author["displayName"] if author else None,
+        body_text=_extract_plain_text(raw["body"]),
+        created=raw["created"],
+    )
+
+
+async def get_comments(client: httpx.AsyncClient, issue_key: str) -> list[JiraComment]:
+    """Comment thread on a single issue - richer "what's recently happened" signal than
+    the bare `updated` timestamp/status change alone.
+    """
+    resp = await client.get(f"/rest/api/3/issue/{issue_key}/comment")
+    resp.raise_for_status()
+    return [_parse_comment(c, issue_key) for c in resp.json()["comments"]]
+
+
+async def search_projects(client: httpx.AsyncClient) -> list[JiraProject]:
+    """Every project the caller's token can browse - pre-fetch's "top projects"
+    discovery (oauth-integration.md's Scope discovery section). No relevance ranking
+    (JIRA has no "my projects" endpoint) - see chat.md for why this beats deriving a
+    ranked list from the asking user's own issues (the person being asked about may not
+    be the person asking, so ranking by the asker's own activity would be the wrong bias).
+    """
+    resp = await client.get("/rest/api/3/project/search", params={"maxResults": 50})
+    resp.raise_for_status()
+    return [JiraProject(key=p["key"], name=p["name"]) for p in resp.json()["values"]]
+
+
+async def search_assignable_users(
+    client: httpx.AsyncClient, project_key: str
+) -> list[JiraAssignableUser]:
+    """Real project members (assignable users), not just the app's static team_members
+    roster - lets the model discover/reference people outside the 3 seeded accounts.
+    emailAddress often comes back blank for accounts other than the token's own owner
+    (confirmed live against the real instance) - account_id, not email, is the
+    reliable identifier discovery hands back.
+    """
+    resp = await client.get("/rest/api/3/user/assignable/search", params={"project": project_key})
+    resp.raise_for_status()
+    return [
+        JiraAssignableUser(
+            account_id=u["accountId"],
+            display_name=u["displayName"],
+            email=u.get("emailAddress") or None,
+        )
+        for u in resp.json()
+    ]
 
 
 async def refresh_access_token(

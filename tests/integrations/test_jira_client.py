@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 import httpx
 import pytest
@@ -7,8 +8,11 @@ import pytest
 from app.integrations.jira_client import (
     build_client,
     find_account_id_by_email,
+    get_comments,
     get_issues_assigned_to,
     refresh_access_token,
+    search_assignable_users,
+    search_projects,
 )
 
 # No real JIRA OAuth access token can be obtained in this environment: build_client's new
@@ -28,6 +32,66 @@ _skip_no_live_token = pytest.mark.skip(
     "sandboxed session. Blocked on app/api/oauth.py's connect flow existing and a human "
     "completing it once (see implementation_log.md)."
 )
+
+# --- Basic-auth (API token) live tests for the discovery/comments/enrichment functions
+# added alongside Phase 3/5 work. These verify the endpoint shapes/parsing logic
+# directly against the real autonomizedtest1.atlassian.net instance - unblocked, unlike
+# the Bearer/cloud_id-scoped tests above, because JIRA API tokens (utils/
+# jira_connect_check.py's existing pattern) work over Basic auth against the direct
+# site base URL, which is exempt from the OAuth rework for standalone/manual use
+# (oauth-integration.md's Client rework section). This does NOT exercise
+# build_client's real Bearer/cloud_id path - the underlying REST endpoints/response
+# shapes are auth-mechanism-agnostic (confirmed live during this session), but full
+# verification of the Bearer-auth path itself is still blocked on the same real 3LO
+# token gap as the tests above.
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_JIRA_SITE_BASE_URL = "https://autonomizedtest1.atlassian.net"
+_JIRA_KAN_PROJECT_KEY = "KAN"
+
+
+def _load_env(path: Path) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        env[key.strip()] = value.strip()
+    return env
+
+
+def _basic_auth_client() -> httpx.AsyncClient:
+    env = _load_env(REPO_ROOT / ".env")
+    email = (
+        os.environ.get("Autonomized_Test_1_Protonmail_Email")
+        or env["Autonomized_Test_1_Protonmail_Email"]
+    )
+    api_token = (
+        os.environ.get("Autonomized_Test_1_Jira_API_Key") or env["Autonomized_Test_1_Jira_API_Key"]
+    )
+    return httpx.AsyncClient(base_url=_JIRA_SITE_BASE_URL, auth=(email, api_token), timeout=10.0)
+
+
+async def test_search_projects_returns_real_project() -> None:
+    async with _basic_auth_client() as client:
+        projects = await search_projects(client)
+
+    assert any(p.key == _JIRA_KAN_PROJECT_KEY for p in projects)
+
+
+async def test_search_assignable_users_returns_real_users() -> None:
+    async with _basic_auth_client() as client:
+        users = await search_assignable_users(client, _JIRA_KAN_PROJECT_KEY)
+
+    assert len(users) > 0
+    assert all(u.account_id for u in users)
+
+
+async def test_get_comments_on_issue_with_no_comments_returns_empty() -> None:
+    async with _basic_auth_client() as client:
+        comments = await get_comments(client, "KAN-8")
+
+    assert comments == []
 
 
 def test_build_client_sets_bearer_auth_header_and_cloud_scoped_base_url() -> None:

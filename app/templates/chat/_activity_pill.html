@@ -2,9 +2,15 @@
     {% if kind == "jira_ticket" %}
         {% set css_class = "jira" %}
         {% set prefix = "JIRA" %}
+    {% elif kind == "jira_comment" %}
+        {% set css_class = "jira" %}
+        {% set prefix = "JIRA comment" %}
     {% elif kind == "github_pr" %}
         {% set css_class = "github" %}
         {% set prefix = "PR" %}
+    {% elif kind == "github_comment" %}
+        {% set css_class = "github" %}
+        {% set prefix = "GitHub comment" %}
     {% else %}
         {% set css_class = "github" %}
         {% set prefix = "Commit" %}

@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     # (oauth-integration.md's Scope discovery section) - one shared knob, not three.
     discovery_top_n: int = 10
 
+    # JQL/commits `since` window for "recent activity" queries (chat.md's previously-
+    # known "this week" gap) - 14, not 7, so activity from slightly over a week ago
+    # isn't silently dropped before the model ever sees it; the model still narrows to
+    # "this week" in its own prose from the real timestamps it gets back.
+    activity_lookback_days: int = 14
+
+    # ChatService's agentic tool-call loop bound (chat.md's ChatService section) -
+    # Phase 5's field, distinct from discovery_top_n above (Phase 1's).
+    max_tool_call_rounds: int = 5
+
 
 @lru_cache
 def get_settings() -> Settings:

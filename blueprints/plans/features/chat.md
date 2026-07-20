@@ -112,11 +112,22 @@ are). Defined here rather than in `oauth-integration.md`'s own client-rework
 code, consistent with `ActivityItem`/`MessageOut` already living in this one
 schemas module for anything chat-prompt-facing.
 
+**Expanded during Phase 3/5 implementation** (see `implementation_log.md`): two
+citable kinds added (`JIRA_COMMENT`, `GITHUB_COMMENT`) once the tools began fetching
+comment threads, plus `JiraPersonRef` added alongside the discovery refs (real project
+members discovered via JIRA's assignable-users search, usable as a `JiraToolParams`
+argument for people outside the static roster). Priority/issue-type (JIRA) and PR
+review decision (GitHub) are folded into each item's pill `label` as enrichment text
+rather than new kinds or `ActivityItem` fields — descriptive detail that doesn't need
+its own pill.
+
 ```python
 class ActivityKind(StrEnum):
     JIRA_TICKET = "jira_ticket"
+    JIRA_COMMENT = "jira_comment"
     GITHUB_COMMIT = "github_commit"
     GITHUB_PR = "github_pr"
+    GITHUB_COMMENT = "github_comment"
 
 class ActivityItem(BaseModel):
     """Service-facing normalized shape both tools return. Feeds citation validation."""
@@ -192,15 +203,15 @@ Common interface every tool implements: `name: str`, `description: str`, `Params
 
 ### `jira_tool.py` — `JiraTool`
 
-`class JiraToolParams(BaseModel): jira_account_email: str; project_key: str` — plain identifiers the model read out of the roster/pre-fetched project list in its own system prompt, not something it resolves itself. Wraps `jira_client.find_account_id_by_email` + `get_issues_assigned_to`, called with the current user's JIRA OAuth token/cloud ID (`oauth-integration.md`). `execute()` does the email→account-id translation internally (existing two-step client shape), maps each `JiraIssue` to an `ActivityItem(kind=JIRA_TICKET, ...)`, and upserts into `activity_items` via `activity_item_repo` keyed on `(conversation_id, kind, external_id=issue.key)`. On a 401, retries once after a silent refresh per `oauth-integration.md`'s JIRA refresh section before surfacing `ToolExecutionError`.
+`class JiraToolParams(BaseModel): jira_account_email: str | None; account_id: str | None; project_key: str` — **exactly one of** `jira_account_email`/`account_id` must be set (Pydantic `model_validator` enforces this). Email covers the roster's 3 seeded members; `account_id` covers anyone the model learned about via pre-fetch's assignable-users discovery (`JiraPersonRef`) — discovery frequently can't resolve an email at all, since JIRA returns a blank `emailAddress` for most non-owner accounts (confirmed live). Wraps `jira_client.find_account_id_by_email` (only on the email path) + `get_issues_assigned_to` + `get_comments`, called with the current user's JIRA OAuth token/cloud ID. Maps each `JiraIssue` to an `ActivityItem(kind=JIRA_TICKET, ...)` with priority/issue-type folded into the pill label, and each comment to `ActivityItem(kind=JIRA_COMMENT, ...)`; both upsert via `activity_item_repo` keyed on `(conversation_id, kind, external_id)`. Issues are fetched with a `since_days=Settings.activity_lookback_days` JQL `updated >= -Nd` bound. On a 401, retries once after a silent refresh per `oauth-integration.md`'s JIRA refresh section before surfacing `ToolExecutionError`.
 
 ### `github_tool.py` — `GithubTool`
 
-`class GithubToolParams(BaseModel): github_login: str; repo: str`, same reasoning. Wraps `github_client.get_recent_commits_by_author` + `get_pull_requests_by_author`, called with the current user's GitHub OAuth token (`oauth-integration.md`). Maps `GithubCommit`/`GithubPullRequest` to `ActivityItem(kind=GITHUB_COMMIT | GITHUB_PR, ...)`, upserts the same way.
+`class GithubToolParams(BaseModel): github_login: str; repo: str`, same reasoning (a discovered contributor's `login` from `GithubCollaboratorRef` works here directly, no email-vs-id split needed since GitHub identifies people by login). Wraps `github_client.get_recent_commits_by_author` (with a `since` bound from `Settings.activity_lookback_days`) + `get_pull_requests_by_author` + `get_pr_reviews` + `get_issue_comments`. Maps commits/PRs to `ActivityItem(kind=GITHUB_COMMIT | GITHUB_PR, ...)` — PR review decision folded into the pill label — and PR comments to `ActivityItem(kind=GITHUB_COMMENT, ...)`, upserting the same way.
 
-Neither tool does name resolution, fuzzy matching, or accepts a display name — the model is expected to have already resolved a display name to an email/login using the roster in context before calling either tool. If it hasn't (roster didn't contain a matching name), that's not a tool failure — the model simply says so in its own prose (MVP-FR-6's "member not found" state is model-generated text, not a thrown error).
+Neither tool does name resolution, fuzzy matching, or accepts a display name — the model is expected to have already resolved a display name to an email/login/account_id using the roster or discovered people/collaborators lists in context before calling either tool. If it hasn't (no matching name anywhere), that's not a tool failure — the model simply says so in its own prose (MVP-FR-6's "member not found" state is model-generated text, not a thrown error).
 
-**Time-bounded queries** (e.g. the rubric's "What has Mike committed *this week*?") are a known gap, not yet solved: `GithubToolParams`/`github_client.get_recent_commits_by_author` have no since/until parameter, so the model has no precise way to scope a commit query to a date range today — it can only eyeball dates in whatever the default page of results returns. Flagged here rather than silently accepted; worth a small follow-up (`since`/`until` on both the client function and `GithubToolParams`, same for JIRA's JQL `updated >= -7d` equivalent) before or shortly after MVP, not solved by this spec.
+**Time-bounded queries** (e.g. the rubric's "What has Mike committed *this week*?") — **resolved during implementation**: `get_recent_commits_by_author` now takes `since`/`until`, `get_issues_assigned_to` takes `since_days` (JQL `updated >= -Nd`), both driven by `Settings.activity_lookback_days` (default 14). The tools scope to that window automatically; the model narrows further to "this week" in its own prose from the real timestamps it receives.
 
 ## Errors (`app/services/chat_errors.py`)
 
@@ -225,6 +236,8 @@ Plain text/markdown files loaded by a small `app/prompts/loader.py`, not string 
 The agentic loop — the single class owning orchestration. Constructed with `session: AsyncSession` passed in explicitly (not self-injected), consistent with CLAUDE.md's transaction-ownership rule: `ChatService` never calls `Depends()` or commits; the route does both.
 
 **`CitationStreamParser`** lives in the same file as a separate class (tightly coupled, always used together, but a distinct responsibility): a stateful rolling-buffer scanner. Consumes `llm_router.TextDelta.text` fragments as they arrive (see `openrouter-integration.md` for the full `QueryEvent` union `ChatService` now consumes — `TextDelta | ToolCallDelta | StreamDone`), regex-scans the buffer for a complete `{{cite:ordinal:uuid}}` match, and yields plain-text spans plus detected matches for `ChatService` to validate and turn into `cite`/`cite-error` events. Handles matches split across delta boundaries by buffering rather than requiring the sentinel to land in a single chunk.
+
+**Real bug found during Phase 5 implementation, not caught by synthetic unit tests**: a real OpenRouter stream splits deltas *inside* the sentinel at boundaries synthetic test fixtures didn't cover — right after the opening `{{` (e.g. `"...PR #1 {{"` then `"cite:1:5bdc6"...`), and right before the final `}` of the closing `}}` (e.g. `"...a43a}"` then `"}.\n\n..."`). The original partial-sentinel regex only held back a tail once it saw a literal `{{c` prefix, so a bare trailing `{{` (or a complete-but-unclosed `{{cite:N:UUID}` with one brace) flushed as plain text instead of being buffered — the sentinel then leaked to the client as raw `{{cite:...}}` text in a `token` event instead of becoming a `cite` event, and the citation was silently lost. Combined with a soft-sounding citation instruction in the prompt, live testing showed the model citing correctly on only 0–1 of 5 identical natural-phrasing queries ("What is Sarah working on these days?") even when it *did* emit a well-formed sentinel — a defect serious enough to have undermined MVP-FR-4 (clickable pills) had it shipped. Fixed by (1) rewriting `_PARTIAL_SENTINEL_RE` to hold back every real prefix of the sentinel including a lone `{`/`{{` and a one-brace-short closing tail, and (2) moving the citation instruction to a "MOST IMPORTANT RULE" section at the top of `chat_system_prompt.md` with a concrete worked example. Verified 5/5 live after the fix, plus regression unit tests using the exact fragment boundaries captured from a real stream (`tests/test_citation_parser.py`).
 
 **`ChatService.run(query: str) -> AsyncIterator[SSEEnvelope]`** — the method the route drives:
 

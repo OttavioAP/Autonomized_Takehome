@@ -3,8 +3,12 @@ from pathlib import Path
 
 from app.integrations.github_client import (
     build_client,
+    get_issue_comments,
+    get_pr_reviews,
     get_pull_requests_by_author,
     get_recent_commits_by_author,
+    get_repo_contributors,
+    get_user_repos,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -74,3 +78,35 @@ async def test_get_pull_requests_by_author_unknown_user_returns_empty() -> None:
         prs = await get_pull_requests_by_author(client, REPO, "nonexistent-user-xyz")
 
     assert prs == []
+
+
+async def test_get_user_repos_returns_seeded_repo() -> None:
+    client = build_client(_github_token())
+    async with client:
+        repos = await get_user_repos(client)
+
+    assert any(r.full_name == REPO for r in repos)
+
+
+async def test_get_repo_contributors_returns_seeded_contributor() -> None:
+    client = build_client(_github_token())
+    async with client:
+        contributors = await get_repo_contributors(client, REPO)
+
+    assert any(c.login == "Autonomized1" for c in contributors)
+
+
+async def test_get_pr_reviews_on_pr_with_no_reviews_returns_empty() -> None:
+    client = build_client(_github_token())
+    async with client:
+        reviews = await get_pr_reviews(client, REPO, 1)
+
+    assert reviews == []
+
+
+async def test_get_issue_comments_on_pr_with_no_comments_returns_empty() -> None:
+    client = build_client(_github_token())
+    async with client:
+        comments = await get_issue_comments(client, REPO, 1)
+
+    assert comments == []

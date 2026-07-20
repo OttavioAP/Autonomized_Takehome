@@ -149,6 +149,22 @@ left to whoever coordinates merging the parallel Phase 1/Phase 2/Phase 4 work to
 
 Gate: integration tests exercising each tool's `execute()` against live JIRA/GitHub data (extending the existing `tests/integrations/test_jira_client.py`/`test_github_client.py` pattern to the tool layer, not just the raw client functions) + a pre-fetch test that runs it twice and confirms the second run is a no-op (cache hit via `prefetched_at`).
 
+**Done, scope expanded beyond the original spec** (bundled with Phase 5, see
+`implementation_log.md`'s Phase 3/5 entries): the project_key/repo design gap from the
+earlier handoff was resolved with *real* scope discovery (`pre_fetch.discover_scope`),
+not a hardcoded stopgap — `search_projects`/`search_assignable_users` (JIRA),
+`get_user_repos`/`get_repo_contributors` (GitHub), all live-verified against real
+JIRA/GitHub instances. Scope also grew to include comments (`JIRA_COMMENT`/
+`GITHUB_COMMENT`, new `ActivityKind` members), PR review decisions, and
+priority/issue-type enrichment — a deliberate widening agreed with the user beyond
+this row's original description, not scope creep discovered after the fact.
+`GithubTool.execute()` fully live-verified (client, tool, and full `ChatService`/route
+levels); `JiraTool.execute()`'s Bearer/`cloud_id` path remains blocked on a real JIRA
+3LO OAuth token (same gap flagged in the original handoff) — the new JIRA client
+functions (`search_projects`/`search_assignable_users`/`get_comments`) ARE
+live-verified via Basic-auth API-token calls against the real instance, since that
+doesn't require the OAuth round-trip.
+
 ### Phase 4 — OpenRouter tool-calling (`openrouter-integration.md`'s revised `query()`)
 
 The `QueryEvent` union, `ToolDefinition`/`ToolCall`, streaming tool-call-delta accumulation. Independent of Phases 2/3's *data* but depends on Phase 3 existing conceptually (tools to define `ToolDefinition`s from) for a realistic end-to-end test — can be built in parallel with Phase 3 if useful, but tested together.
@@ -160,6 +176,21 @@ Gate: the three test cases already specified in `openrouter-integration.md`'s Te
 The agentic loop itself: `CitationStreamParser`, the tool-call round-trip loop, citation validation, `GET /`, `GET /conversations/{id}`, `POST /conversations`, `POST /conversations/{id}/chat`. This is the single largest phase — depends on everything before it (OAuth for tokens, schema for persistence, tools for data, `llm_router` for the model round-trip).
 
 Gate: this is where MVP-FR-5/FR-7/FR-9/FR-10/FR-11 all actually come together — write both unit tests (`CitationStreamParser` against synthetic delta sequences, no live API needed) and integration tests (a full `ChatService.run()` call against real OpenRouter + real JIRA/GitHub data, asserting a real citation round-trips correctly end to end). Manually exercise via `POST /conversations/{id}/chat` with curl/httpx before considering this "working," since this is the core of the whole app and deserves more than automated coverage alone.
+
+**Done** (see `implementation_log.md`'s Phase 5 entry for full detail, including a
+genuine citation-reliability defect found and fixed during this phase — not caught by
+synthetic unit tests, only surfaced through live end-to-end testing). `ChatService` +
+`CitationStreamParser` built exactly per spec's numbered steps. Routes built:
+`GET /` (redirect), `GET /conversations/{id}`, `POST /conversations`,
+`POST /conversations/{id}/chat` (SSE). New `chat.html` template (message log + input
+form + vanilla-JS SSE-over-POST reader — `htmx-ext-sse` doesn't fit a CSRF-protected
+POST endpoint, so this deviates from the spec's original `htmx-ext-sse` assumption,
+a deliberate implementation-time call). Unit tests (`CitationStreamParser`, 9 cases
+including 2 real-stream-split regressions) + integration test (`ChatService.run()`
+live against real OpenRouter + GitHub, real citation round-trip) + manual httpx
+exercise against the real running app (GET page render, POST SSE stream, reload
+history replay) all done. JIRA leg of the live integration/manual coverage remains
+blocked on the same 3LO OAuth gap as Phase 3.
 
 ### Phase 6 — Chat UI (`chat.md`'s Templates + Static sections)
 

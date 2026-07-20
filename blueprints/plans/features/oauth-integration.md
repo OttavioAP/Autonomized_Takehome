@@ -92,6 +92,27 @@ of a policy on paper.
 
 ## Scope discovery, not fixed config
 
+**Implemented in Phase 3/5, real endpoints verified live** (see `implementation_log.md`)
+— the "TBD at implementation time" fields below are now settled:
+- JIRA projects: `GET /rest/api/3/project/search` (every project the token can
+  browse — chosen over deriving a ranked list from the asking user's own issues,
+  since the person being asked about may not be the asker, so ranking by the
+  asker's own activity would bias toward the wrong projects).
+- JIRA people: `GET /rest/api/3/user/assignable/search?project={key}` on the
+  top-ranked discovered project — real project members, not just the 3 seeded
+  `team_members`. Returns `accountId`/`displayName`/`emailAddress`, but
+  `emailAddress` comes back blank for most non-owner accounts (confirmed live) —
+  `account_id`, not email, is the reliable identifier this feeds into
+  `JiraToolParams`.
+- GitHub repos: `GET /user/repos?sort=pushed&direction=desc` (the token's own
+  repos, most-recently-pushed first — not `GET /users/{login}/repos`, a
+  different public-listing endpoint with different auth semantics).
+- GitHub collaborators: `GET /repos/{repo}/contributors` on the single
+  most-recently-pushed discovered repo only (not fanned out across all
+  `discovery_top_n` repos) — server-aggregated and sorted by contribution
+  count already, one extra call is a better tradeoff than N extra calls for
+  prompt-context-only data.
+
 `JIRA_PROJECT_KEY`, `GITHUB_REPO`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `GITHUB_TOKEN`
 are removed from `Settings` entirely — there is no longer a single
 project/repo the whole app is pointed at. Instead, **pre-fetch discovers scope
@@ -135,7 +156,15 @@ pre-fetch in `chat.md`, extended to also resolve *where* to look:
   purely system-prompt context, but kept as a typed Pydantic shape rather
   than a bare string for the same reasons (name in prose, `login` if the
   model ever needs to hand a person identifier to `GithubToolParams.github_login`
-  when asking about that person specifically).
+  when asking about that person specifically). **Added during implementation**:
+  `JiraPersonRef(account_id: str, display_name: str, email: str | None)` — JIRA's
+  asymmetric counterpart to `GithubCollaboratorRef`. Unlike GitHub (where
+  `github_login` already accepts any login, discovered or rostered, with no
+  resolution step), JIRA's tool needs an `account_id` specifically for
+  discovered people since `find_account_id_by_email` can't resolve an email
+  JIRA never returned — so `JiraPersonRef` *is* a tool-parameter source
+  (`JiraToolParams.account_id`), not prompt-context-only like its GitHub
+  counterpart.
 
 This pre-fetched project/repo list becomes system-prompt context the LLM
 reads, exactly like the team roster already is. `JiraTool`/`GithubTool` gain a

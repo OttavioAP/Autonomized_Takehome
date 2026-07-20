@@ -60,6 +60,31 @@ async def get_by_natural_key(
     return result.scalar_one_or_none()
 
 
+async def upsert(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+    kind: str,
+    external_id: str,
+    label: str,
+    url: str,
+) -> ActivityItem:
+    """The one function chat.md's Tools/Pre-fetch sections both call - "cite the same
+    ticket in turn 3 that was fetched in turn 1" resolving to a stable id depends on
+    this being the single upsert path both callers share, keyed on the table's own
+    unique constraint (conversation_id, kind, external_id). Refreshes label/url/
+    fetched_at on an existing row (a ticket's title can change between fetches) rather
+    than leaving stale display text pointing at the same stable id. Caller commits.
+    """
+    existing = await get_by_natural_key(session, conversation_id, kind, external_id)
+    if existing is not None:
+        existing.label = label
+        existing.url = url
+        existing.fetched_at = datetime.now(UTC)
+        await session.flush()
+        return existing
+    return await create(session, conversation_id, kind, external_id, label, url)
+
+
 async def delete(session: AsyncSession, activity_item_id: uuid.UUID) -> None:
     """Basic CRUD completeness — nothing in chat.md's design calls this yet."""
     item = await session.get(ActivityItem, activity_item_id)

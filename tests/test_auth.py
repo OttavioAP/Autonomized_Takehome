@@ -64,10 +64,12 @@ async def test_logout_rejects_wrong_csrf_token(authenticated_client: AsyncClient
 
 
 async def test_logout_revokes_session_and_clears_cookie(authenticated_client: AsyncClient) -> None:
-    # Read the real csrf_token back out via the index page's hidden form field
+    # Read the real csrf_token back out via a rendered page's hidden form field
     # rather than reaching into the fixture's internals, so this exercises the
-    # actual value a browser would submit.
-    index_response = await authenticated_client.get("/")
+    # actual value a browser would submit. GET / now redirects into the user's
+    # conversation view (chat.md's Routes change), so follow the redirect to reach
+    # the page that actually renders the sign-out form.
+    index_response = await authenticated_client.get("/", follow_redirects=True)
     assert 'name="csrf_token"' in index_response.text
 
     match = re.search(r'name="csrf_token" value="([^"]+)"', index_response.text)

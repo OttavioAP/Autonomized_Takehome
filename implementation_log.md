@@ -1037,3 +1037,271 @@ chat.py`, `chat_errors.py`, `activity_item_repo.upsert`) — stashed (`git stash
 Phase 1's commit stays a clean, single-phase unit per the handoff's "don't batch
 multiple phases into one commit" rule. Will resume from the stash once Phase 1's commit
 is confirmed deployed and green.
+
+**Deploy confirmed green** (`62e3001`): both `test` and `deploy` jobs succeeded in CI.
+Hit the exact "intermittent interrupted-pull-on-restart" issue `deployment.md` already
+documents — the site reported `state=Running` via `az webapp show` but every request
+timed out completely (curl exit 28) for ~30s after the deploy's own automatic
+double-restart completed. `deploy.yml`'s built-in second restart apparently wasn't
+enough this time; one more manual `az webapp restart` recovered it fully. Verified live
+afterward: `/` correctly 401s for non-HTML clients and 302s to `/login` for HTML
+`Accept` headers, `/login` returns 200 — matching local behavior exactly. Third
+occurrence of this specific quirk across the project's history (two in `deployment.md`'s
+own execution notes, this one) — still no root cause identified, `deployment.md`'s own
+guidance ("if this recurs and a third restart is ever needed, treat that as a signal to
+investigate further") is worth revisiting if it happens a fourth time, but not blocking
+right now.
+
+## Phase 3 drafted, handed off unfinished (bundled with Phase 5)
+
+Resumed Phase 3 from the `git stash` created before Phase 1's commit (see the entry
+above). Built `app/services/tools/base.py` (`ActivityTool` ABC), `jira_tool.py`
+(`JiraTool`, including the retry-once-after-silent-refresh-on-401 path per
+`oauth-integration.md`), `github_tool.py` (`GithubTool`), `app/services/chat_errors.py`
+(`ToolExecutionError`, `UpstreamProviderError`), `app/schemas/chat.py`
+(`ActivityKind`/`ActivityItem` only — the minimum Phase 3 needs), and
+`app/repositories/activity_item_repo.py`'s `upsert()` (the shared function both
+pre-fetch and tool-calling call per spec). Also built `app/services/pre_fetch.py`.
+
+**Real bug caught before any tool code shipped**: `accessible-resources`' response has
+both `id` (cloud_id) and `url` (the real site host) — `JiraTool` needs both to build a
+correct citation deep-link (the API base URL, `api.atlassian.com/ex/jira/{cloud_id}`,
+is not a real browsable URL). Fixed at the source in Phase 1's commit (already merged):
+added `team_members.jira_site_url`, `team_member_repo.set_jira_cloud_id` now takes and
+stores both, `oauth.py`'s callback passes both through. `jira_tool.py` consumes
+`site_url` from its `**credentials` contract.
+
+**Real, unresolved design gap, documented in `pre_fetch.py`'s own docstring rather than
+silently decided**: pre-fetch needs a `project_key`/`repo` to call `JiraTool`/
+`GithubTool` with, but `oauth-integration.md`'s "scope discovery" (auto-discovering a
+user's top JIRA projects/GitHub repos, `JiraProjectRef`/`GithubRepoRef`/
+`GithubCollaboratorRef`) was never built — nothing consumes it yet, since the system
+prompt that would render discovered projects/repos is Phase 5's job, not built either.
+Made `project_key`/`repo` explicit required arguments to `pre_fetch.run()` rather than
+hardcoding a single project/repo (which would resurrect exactly the "one configured
+project/repo the whole app is pointed at" pattern the OAuth rework was built to kill) —
+but this just pushes the decision to whoever calls `pre_fetch.run()` next. Flagged
+explicitly in the Phase 5 handoff as a real decision to make consciously, not a detail
+to paper over.
+
+**Nothing in Phase 3 has been live-verified.** Ruff/mypy pass, the full existing test
+suite (40 passed, 3 skipped) still passes because none of this new code is wired into
+anything that runs yet — that's static checking, not proof `JiraTool.execute()`/
+`GithubTool.execute()` actually work against real APIs. No integration tests were
+written for the tools or pre-fetch.
+
+**Decision: bundled the rest of Phase 3 (live verification + tests) with Phase 5
+(`ChatService`) into one combined handoff**
+(`blueprints/handoffs/handoff-6-phase3-verify-and-phase5-chatservice.md`), rather than
+finishing Phase 3 solo first. Reasoning (user's call, not mine): whoever builds
+`ChatService` needs to deeply understand the tool `execute()` contract anyway (it's the
+thing `ChatService`'s tool-call loop directly drives), so verifying tools live as part
+of building their first real caller is more efficient than verifying them in isolation
+first and re-deriving the same understanding again for Phase 5. This means Phase 3's own
+phase-gate (tests green, commit, push, deploy) will land bundled with Phase 5's,
+slightly bending the "one phase per commit" rule from the original handoff doc — a
+deliberate, explicit exception, not an oversight.
+
+**Found and fixed two stale tracker claims while reviewing before handoff** (user asked
+directly "any documentation discrepancies you want to clear up"): `features.md`'s
+MVP-FR-9 row still said "blocked on `app/api/oauth.py`, not yet built" — stale since
+Phase 1 shipped `oauth.py` and deployed it. Also both MVP-FR-9/MVP-FR-10's Specced and
+Deployed columns were `⬜` despite both being fully specced (`chat.md`'s Tools section)
+and genuinely deployed (the `jira_client.py`/`github_client.py` rework shipped live in
+Phase 1's commit) — flipped both to ✅. Also flipped Implemented from ✅ back to 🟡 for
+both rows: the raw client functions are real and tested, but MVP-FR-9/10 as specced are
+about the tool-layer behavior (`JiraTool`/`GithubTool`), which is unverified — leaving
+Implemented at ✅ on unverified code would have been aspirational, not honest, per
+CLAUDE.md's own status-definition rule.
+
+**Handoff file**: `blueprints/handoffs/handoff-6-phase3-verify-and-phase5-chatservice.md`
+— long, deliberately so, given the combined scope. Points at every file the next agent
+needs to read, the exact `**credentials` kwarg contracts both tools expect, the
+project_key/repo design gap, the existing repositories' real function signatures
+(explicitly told not to assume them), the `resolve_citations` template contract from
+Phase 6, and the known intermittent-post-deploy-unresponsive quirk with its established
+fix. Not yet dispatched as of this entry — user will run it in a separate session.
+
+## Phase 3 finished (scope expanded, agreed with user) + Phase 5 (`ChatService`) built
+
+Picked up `blueprints/handoffs/handoff-6-phase3-verify-and-phase5-chatservice.md` in a
+fresh session. Before writing any code, walked through the handoff's open design
+question — scope discovery's `project_key`/`repo` gap — directly with the user rather
+than picking a default. That conversation expanded well beyond the handoff's own
+scope: the user wanted richer API usage generally (not just enough to unblock
+pre-fetch), landing on person discovery (not just projects/repos) plus comments/PR
+review status as real product value, not just plumbing. This is why Phase 3's actual
+diff is substantially larger than the handoff described — a deliberate, explicit
+widening agreed with the user, documented here so it doesn't read as silent scope
+creep later.
+
+**Design decisions made explicitly, not defaulted:**
+- **JIRA project discovery**: `GET /rest/api/3/project/search` (every project the
+  token can browse) over deriving a ranked list from the asking user's own assigned
+  issues. Reasoning: the person being asked about is frequently *not* the person
+  asking, so ranking by the asker's own activity would systematically bias toward the
+  wrong projects for exactly the "ask about someone else" case the whole feature
+  exists to serve.
+- **JIRA person discovery**: `GET /rest/api/3/user/assignable/search?project={key}` —
+  real project members, not just the 3 seeded `team_members`. Verified live before
+  committing to it in `JiraToolParams`'s design (the user explicitly asked for live
+  verification rather than proceeding on training-data assumptions about the
+  endpoint) — confirmed real, but also confirmed `emailAddress` comes back blank for
+  most non-owner accounts on this instance, which is why `JiraToolParams` needed an
+  `account_id` alternative to `jira_account_email`, not just email-based lookup as
+  originally specced.
+- **GitHub collaborator discovery**: `GET /repos/{repo}/contributors` on the single
+  most-recently-pushed repo only, not fanned out across all `discovery_top_n` repos —
+  this is prompt-context-only data, so one extra call beats N extra calls for a
+  completeness gain the model rarely needs.
+- **`activity_lookback_days` default**: 14, not 7 — the user flagged 7 as likely too
+  tight; a "these days"/"recently" query shouldn't silently drop a ticket touched 9
+  days ago before the model ever sees it. The model still narrows to "this week" in
+  its own prose from the real timestamps it receives.
+- **Comments/enrichment split**: new citable `ActivityKind`s (`JIRA_COMMENT`/
+  `GITHUB_COMMENT`) for comment threads, but priority/issue-type (JIRA) and PR review
+  decision (GitHub) folded into existing items' pill *labels* as enrichment text
+  rather than new `ActivityItem` fields or kinds — descriptive detail that doesn't
+  need its own citable pill, keeping the citation schema from growing for data that
+  isn't really a separate "thing."
+
+**Live verification discipline**: every new JIRA/GitHub endpoint was hit live via
+curl against the real instances *before* being wired into client code — including two
+throwaway JIRA comment / GitHub issue-comment posts made specifically to inspect the
+real response shape (ADF body structure, comment author fields), both cleaned up
+(DELETE'd) immediately after. This caught the real emailAddress-blank behavior above,
+which training-data knowledge alone would have missed.
+
+**Real gap that remains, not solved this pass**: `JiraTool.execute()`'s actual
+Bearer/`cloud_id`-scoped path (`jira_client.build_client(access_token, cloud_id)`) is
+still not live-verified end to end — same root cause as every prior entry on this
+topic: no real JIRA 3LO OAuth access token exists in this sandboxed environment,
+requiring a human to complete Atlassian's interactive consent screen once. What
+changed this session: the *new* JIRA client functions (`search_projects`,
+`search_assignable_users`, `get_comments`) ARE live-verified, via a real JIRA API
+token (Basic auth against the direct site base URL, `utils/jira_connect_check.py`'s
+existing pattern) rather than the OAuth Bearer path — a different auth mechanism
+hitting the same real REST endpoints, so the endpoint/parsing logic is verified even
+though the Bearer/`cloud_id` code path specifically is not. `tests/test_tools.py`'s
+`JiraTool.execute()` test and `tests/test_pre_fetch.py`'s JIRA-leg test remain
+skip-marked (`JIRA_TEST_ACCESS_TOKEN`/`JIRA_TEST_CLOUD_ID`/`JIRA_TEST_SITE_URL`,
+self-unskip), same pattern as every prior JIRA OAuth gap in this project's history.
+
+### Phase 5: `ChatService`, prompts, routes, real chat page
+
+Built exactly per `chat.md`'s numbered `ChatService.run()` steps: `CitationStreamParser`
+(stateful rolling-buffer sentinel scanner) and `ChatService` (system prompt built from
+roster + pre-fetched activity + discovered scope, tool-call round-trip loop bounded at
+`Settings.max_tool_call_rounds`, citation validation against `activity_item_repo`,
+persistence of user/assistant messages + `message_citations` — never the in-memory
+`tool`-role messages, per the project's existing model-authoritative-ordinal decision).
+`app/prompts/loader.py` + `chat_system_prompt.md`/`tool_limit_reached.md` as plain
+files, not inline string literals. Four routes in `app/api/pages.py`: `GET /`
+(redirect into the user's most recent conversation, creating one if none exists),
+`GET /conversations/{id}` (ownership check, triggers pre-fetch if
+`prefetched_at IS NULL`, renders history), `POST /conversations` (one-line insert),
+`POST /conversations/{id}/chat` (CSRF-checked, SSE-streamed, commits once at the end
+— `ChatService`/repositories never commit, per CLAUDE.md).
+
+**Real implementation-time deviation from the spec's assumption, made deliberately**:
+`openrouter-integration.md`/`chat.md` assumed `htmx-ext-sse` for the client-side SSE
+wiring, and it's already vendored (`app/static/vendor/htmx-ext-sse.js`, loaded
+globally in `base.html`) — but that extension is GET-oriented (`sse-connect` on a
+`GET` URL), and this project's chat endpoint is a CSRF-protected `POST` (the CSRF
+token has to be submitted in the body, matching every other mutating route in this
+codebase). Bending `htmx-ext-sse` to a POST felt like fighting the tool rather than
+using it, so the chat page instead drives the stream with a small amount of vanilla
+JS (`fetch` + `ReadableStream` reader, manually parsing `event:`/`data:` frame
+boundaries) — genuinely simpler than the alternative, and it's the only piece of
+hand-rolled JS in the whole app, isolated to one script block in `chat.html`.
+
+**Real bug found and fixed, the most significant one from this whole session — not
+caught by synthetic unit tests, only surfaced by testing against a real live stream.**
+`CitationStreamParser`'s original partial-sentinel regex (`_PARTIAL_SENTINEL_RE`)
+required a literal `{{c` prefix before holding back a buffer tail. Once
+`ChatService.run()` was wired end-to-end and exercised against real OpenRouter output,
+querying "What is Sarah working on these days?" (the rubric's own canonical phrasing)
+five times in a row produced a rendered citation on **zero** of five runs — even
+though inspection of the raw token stream showed the model *was* emitting a
+well-formed `{{cite:1:<real-uuid>}}` sentinel with a genuinely valid, real
+`activity_items` id. The sentinel was leaking through as plain `token` events instead
+of becoming a `cite` event. Root cause, found by capturing the actual raw
+`TextDelta.text` fragments OpenRouter returns (not the reassembled full string my
+earlier unit tests exercised): the fragmentation splits mid-sentinel at boundaries
+`_PARTIAL_SENTINEL_RE` didn't cover — right after the opening `{{` (one fragment ends
+`"...PR #1 {{"`, the next starts `"cite:1:5bdc6"`) and right before the final `}` of
+the closing `}}` (one fragment ends `"...a43a}"`, the next starts `"}.\n\n..."`). A
+bare trailing `{{` or a complete-but-one-brace-short sentinel both flushed as plain
+text instead of being held back, so the citation was silently lost on the client side
+even though the model, the tool call, and the underlying `activity_items` row were all
+correct. This is exactly the kind of defect that would have shipped invisibly — every
+automated test passed, the model behaved correctly, and the bug only manifested as
+"citations don't render," which reads like a model-quality problem, not a parser bug,
+unless you inspect the raw stream directly. Separately, the system prompt's citation
+instruction was also too soft (buried mid-document, phrased as "whenever you
+reference..." rather than a hard rule) — even after the parser fix, the model itself
+often chose not to cite on natural phrasing. Fixed both: rewrote
+`_PARTIAL_SENTINEL_RE` to hold back every real prefix of the sentinel including a lone
+`{`/`{{` and a one-brace-short closing tail; rewrote the prompt's citation section as
+a "MOST IMPORTANT RULE" block at the very top of `chat_system_prompt.md` with a
+concrete worked example. Verified 5/5 live after both fixes (up from 0/5 before), with
+two new regression unit tests (`tests/test_citation_parser.py`) built from the exact
+fragment boundaries captured from the real failing stream, not synthetic guesses.
+
+**Second, smaller bug found via the manual httpx exercise** (not the automated
+`ChatService.run()` test, which calls the service directly, bypassing template
+rendering): `GET /conversations/{id}` 500'd with `TypeError: Object of type UUID is
+not JSON serializable` — `chat.html`'s inline script did `{{ conversation_id | tojson
+}}` directly on a `uuid.UUID` object, which Jinja's `tojson` filter can't serialize.
+Fixed with `| string | tojson`. This is exactly why the project's working agreement
+requires a real manual UI/HTTP exercise, not just automated coverage — the automated
+`ChatService` test never touches the route/template layer at all, so this bug was
+invisible to it.
+
+**Two pre-existing tests broken by `GET /`'s intended behavior change**, both fixed
+rather than deleted: `test_hello_world.py::test_index_renders_ping_button` asserted
+the old `index.html` rendering (a Phase-0 placeholder with a ping button) — `GET /`
+now redirects into a real conversation per `chat.md`'s Routes section, so the ping
+button assertion is genuinely gone; replaced with an assertion on the real new
+behavior (redirects, then renders `chat.html`'s real chat form). `test_auth.py`'s
+logout test read the CSRF token from `GET /`'s rendered HTML directly — now needs
+`follow_redirects=True` to reach a page that actually renders a form. Both are
+legitimate consequences of an intentional spec-driven behavior change, not collateral
+damage to paper over.
+
+**`_activity_pill.html`'s macro and `app/templating.py`'s `resolve_citations`
+`_ACTIVITY_KIND_META`** both needed the two new `ActivityKind` members
+(`jira_comment`/`github_comment`) added — without this, a comment citation would have
+silently rendered mislabeled as a bare commit pill (the macro's `else` fallback). Not
+the pre-existing macro/filter duplication the earlier handoff flagged as a known,
+deliberately-unfixed inconsistency — this is new kinds needing coverage in both
+existing duplicated copies, done in both places since leaving one behind would have
+been a real, reachable bug (JIRA comment pills through history replay vs. live SSE
+would have looked different).
+
+**Verification**: `tests/test_citation_parser.py` (9 unit tests), `tests/
+test_chat_service.py` (live `ChatService.run()` against real OpenRouter + GitHub,
+asserting `token`/`tool-status` events fire, no `cite-error`, no leaked sentinel, and
+a real citation on the natural rubric phrasing — genuinely reliable now, not
+"sometimes passes"), `tests/test_tools.py` + `tests/test_pre_fetch.py` (live
+`GithubTool`/pre-fetch execution, JIRA legs skip-marked per the OAuth gap above),
+`tests/integrations/test_jira_client.py` + `test_github_client.py` (new live client
+function tests). Manual exercise: a real httpx session against the actually-running
+`docker compose` app — seeded a real `UserSession`/`conversations` row, stored a real
+GitHub token in Key Vault, `GET /conversations/{id}` (caught the UUID-serialization
+bug above), `POST /conversations/{id}/chat` (confirmed real SSE framing, a real `cite`
+event with a real validated `activity_items` id, no leaked sentinel), reloaded the
+page (confirmed the citation persisted and replayed as a real `activity-pill` via
+`resolve_citations`). Full suite: 64 passed, 5 skipped. ruff/mypy/djlint all clean
+(mypy's only findings are the same 13 pre-existing `Settings()` call-arg false
+positives, unchanged).
+
+Updated `chat.md` (Schemas/Tools/Pre-fetch/ChatService sections) and
+`oauth-integration.md` (Scope discovery section, settling the "TBD at implementation
+time" ref-field shapes to the real, live-verified endpoints actually used) to match
+what's built, per this project's spec-stays-truthful convention. `features.md`/
+`timeline.md`/`CHANGELOG.md` updated in the same pass — see `CHANGELOG.md`'s matching
+dated entry for the tracker-level summary.
+
+Not yet committed/pushed/deploy-verified as of this entry — that's the final step of
+this same work item, done once this entry itself is written.

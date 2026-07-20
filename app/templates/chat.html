@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Team Activity Monitor{% endblock title %}
+{% block extra_head %}
+    <link rel="stylesheet" href="{{ url_for('static', path='css/chat.css') }}" />
+{% endblock extra_head %}
+{% block content %}
+    <nav>
+        <ul>
+            <li><strong>Team Activity Monitor</strong></li>
+        </ul>
+        <ul>
+            <li>
+                <details class="dropdown">
+                    <summary>Conversations</summary>
+                    <ul>
+                        {% for conversation in conversations %}
+                            <li>
+                                <a href="{{ url_for('conversation_view', conversation_id=conversation.id) }}">{{ conversation.title or "New conversation" }}</a>
+                            </li>
+                        {% endfor %}
+                        <li>
+                            <form method="post" action="{{ url_for('create_conversation') }}">
+                                <button type="submit" class="secondary">+ New conversation</button>
+                            </form>
+                        </li>
+                    </ul>
+                </details>
+            </li>
+            <li>{{ current_user.user_display_name }}</li>
+            <li>
+                <form method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ current_user.csrf_token }}" />
+                    <button type="submit" class="secondary">Sign out</button>
+                </form>
+            </li>
+        </ul>
+    </nav>
+    <div class="chat-log" id="chat-log">
+        {% for message in messages %}
+            {% include "chat/_message.html" %}
+        {% endfor %}
+    </div>
+    <form id="chat-form" autocomplete="off">
+        <input type="hidden" id="csrf-token" value="{{ current_user.csrf_token }}" />
+        <fieldset role="group">
+            <input type="text"
+                   id="chat-input"
+                   name="query"
+                   placeholder="What is Sarah working on these days?"
+                   required />
+            <button type="submit">Send</button>
+        </fieldset>
+    </form>
+    <script>
+        // Vanilla SSE-over-POST: htmx-ext-sse is GET-oriented, but this endpoint is a
+        // CSRF-protected POST, so we drive the stream ourselves via fetch + a streaming
+        // reader, appending token events into the assistant bubble as they arrive.
+        const form = document.getElementById("chat-form");
+        const input = document.getElementById("chat-input");
+        const log = document.getElementById("chat-log");
+        const csrfToken = document.getElementById("csrf-token").value;
+        const conversationId = {{ conversation_id | string | tojson }};
+
+        function bubble(role) {
+            const div = document.createElement("div");
+            div.className = "chat-bubble chat-bubble--" + role;
+            const roleEl = document.createElement("div");
+            roleEl.className = "chat-bubble__role";
+            roleEl.textContent = role;
+            const content = document.createElement("div");
+            content.className = "chat-bubble__content";
+            div.appendChild(roleEl);
+            div.appendChild(content);
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+            return content;
+        }
+
+        function pill(item) {
+            const meta = {
+                jira_ticket: ["jira", "JIRA"],
+                jira_comment: ["jira", "JIRA comment"],
+                github_commit: ["github", "Commit"],
+                github_pr: ["github", "PR"],
+                github_comment: ["github", "GitHub comment"],
+            }[item.kind] || ["github", ""];
+            const a = document.createElement("a");
+            a.className = "activity-pill activity-pill--" + meta[0];
+            a.href = item.url;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = (meta[1] ? meta[1] + ": " : "") + item.label;
+            return a;
+        }
+
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const query = input.value.trim();
+            if (!query) return;
+            input.value = "";
+
+            bubble("user").textContent = query;
+            const assistant = bubble("assistant");
+            let toolStatus = null;
+
+            const body = new URLSearchParams({ query, csrf_token: csrfToken });
+            const resp = await fetch(`/conversations/${conversationId}/chat`, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body,
+            });
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let sep;
+                while ((sep = buffer.indexOf("\n\n")) !== -1) {
+                    const frame = buffer.slice(0, sep);
+                    buffer = buffer.slice(sep + 2);
+                    let eventName = "message";
+                    let dataLine = "";
+                    for (const line of frame.split("\n")) {
+                        if (line.startsWith("event: ")) eventName = line.slice(7);
+                        else if (line.startsWith("data: ")) dataLine += line.slice(6);
+                    }
+                    if (!dataLine) continue;
+                    const data = JSON.parse(dataLine);
+                    if (eventName === "token") {
+                        if (toolStatus) { toolStatus.remove(); toolStatus = null; }
+                        assistant.appendChild(document.createTextNode(data.text));
+                    } else if (eventName === "cite") {
+                        if (toolStatus) { toolStatus.remove(); toolStatus = null; }
+                        assistant.appendChild(pill(data.item));
+                    } else if (eventName === "cite-error") {
+                        const span = document.createElement("span");
+                        span.className = "cite-error";
+                        span.title = data.detail;
+                        span.textContent = "[" + data.ordinal + ": unresolved citation]";
+                        assistant.appendChild(span);
+                    } else if (eventName === "tool-status") {
+                        if (!toolStatus) {
+                            toolStatus = document.createElement("p");
+                            toolStatus.className = "tool-status";
+                            assistant.appendChild(toolStatus);
+                        }
+                        toolStatus.textContent = data.message;
+                    } else if (eventName === "error") {
+                        const p = document.createElement("p");
+                        p.className = "chat-error";
+                        p.textContent = data.detail;
+                        assistant.appendChild(p);
+                    }
+                    log.scrollTop = log.scrollHeight;
+                }
+            }
+        });
+    </script>
+{% endblock content %}
