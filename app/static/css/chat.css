@@ -392,7 +392,27 @@
     cursor: help;
 }
 
+/* Upstream-failure state (chat.md's Errors section: OpenRouter/JIRA/GitHub
+   unreachable) - a distinct bordered banner, not just red inline text, so it
+   reads as "something actually broke" rather than blending into the
+   assistant's own prose. */
 .chat-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: var(--tam-radius);
+    background: color-mix(in srgb, var(--tam-danger) 12%, var(--tam-surface));
+    border: 1px solid color-mix(in srgb, var(--tam-danger) 40%, transparent);
     color: var(--tam-danger);
-    font-size: 0.9em;
+    font-size: 0.88em;
+    line-height: 1.45;
+}
+
+.chat-error::before {
+    content: "⚠";
+    flex-shrink: 0;
+    font-size: 1em;
+    line-height: 1.45;
 }

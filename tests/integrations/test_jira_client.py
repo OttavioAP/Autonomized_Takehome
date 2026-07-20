@@ -186,3 +186,18 @@ async def test_get_issues_assigned_to_unknown_account_returns_empty() -> None:
         )
 
     assert issues == []
+
+
+async def test_get_issues_assigned_to_unreachable_host_raises_httpx_http_error() -> None:
+    """JiraTool.execute() wraps httpx.HTTPError (both a real error status and a
+    connection-level failure) into ToolExecutionError; this confirms the underlying
+    client function actually raises that error family for a genuine connection
+    failure. Not gated behind a real access token - the connection fails before auth
+    is ever checked. 127.0.0.1:1 is a real, immediate connection-refused failure
+    (nothing listens there), not a mock.
+    """
+    client = build_client("irrelevant-token", "irrelevant-cloud-id")
+    client.base_url = "http://127.0.0.1:1"
+    async with client:
+        with pytest.raises(httpx.HTTPError):
+            await get_issues_assigned_to(client, "KAN", "irrelevant-account-id")

@@ -74,18 +74,22 @@ class JiraTool(ActivityTool):
 
         try:
             issues = await self._fetch(access_token, cloud_id, params, lookback_days)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 401:
+        except httpx.HTTPError as exc:
+            # Only a 401 status triggers the silent-refresh retry path
+            # (oauth-integration.md); any other HTTP error status, and any
+            # connection-level failure (unreachable host, timeout, DNS) - which has no
+            # .response at all - both become a hard, immediate ToolExecutionError.
+            if not (isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 401):
                 raise ToolExecutionError(f"JIRA lookup failed: {exc}") from exc
             # Silent refresh, retry once - oauth-integration.md's JIRA silent-refresh
-            # design. A second 401 after a successful refresh, or the refresh call
+            # design. A second failure after a successful refresh, or the refresh call
             # itself failing, both become a hard ToolExecutionError - no second retry.
             async with httpx.AsyncClient(timeout=10.0) as refresh_client:
                 try:
                     refreshed = await jira_client.refresh_access_token(
                         refresh_client, refresh_token, client_id, client_secret
                     )
-                except httpx.HTTPStatusError as refresh_exc:
+                except httpx.HTTPError as refresh_exc:
                     raise ToolExecutionError(
                         f"JIRA re-authentication failed: {refresh_exc}"
                     ) from refresh_exc
@@ -95,7 +99,7 @@ class JiraTool(ActivityTool):
             )
             try:
                 issues = await self._fetch(access_token, cloud_id, params, lookback_days)
-            except httpx.HTTPStatusError as retry_exc:
+            except httpx.HTTPError as retry_exc:
                 raise ToolExecutionError(f"JIRA lookup failed: {retry_exc}") from retry_exc
 
         results: list[ActivityItem] = []
@@ -126,7 +130,7 @@ class JiraTool(ActivityTool):
 
                 try:
                     comments = await jira_client.get_comments(client, issue.key)
-                except httpx.HTTPStatusError as exc:
+                except httpx.HTTPError as exc:
                     raise ToolExecutionError(
                         f"JIRA comment lookup failed for {issue.key}: {exc}"
                     ) from exc

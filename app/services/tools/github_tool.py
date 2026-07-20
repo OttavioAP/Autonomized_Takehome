@@ -141,7 +141,10 @@ class GithubTool(ActivityTool):
                                 url=comment_row.url,
                             )
                         )
-        except httpx.HTTPStatusError as exc:
+        except httpx.HTTPError as exc:
+            # Covers both a real HTTP error status and connection-level failure
+            # (unreachable host, timeout, DNS) - httpx.HTTPStatusError and
+            # httpx.RequestError/ConnectError/TimeoutException share this base.
             raise ToolExecutionError(f"GitHub lookup failed: {exc}") from exc
 
         return results

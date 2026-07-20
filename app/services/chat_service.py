@@ -6,6 +6,7 @@ driving run() is exhausted).
 """
 
 import asyncio
+import logging
 import re
 from collections.abc import AsyncIterator
 from uuid import UUID
@@ -53,6 +54,8 @@ from app.services.token_store import get_github_token, get_jira_tokens
 from app.services.tools.base import ActivityTool
 from app.services.tools.github_tool import GithubTool, GithubToolParams
 from app.services.tools.jira_tool import JiraTool, JiraToolParams
+
+logger = logging.getLogger(__name__)
 
 _CITE_SENTINEL_RE = re.compile(r"\{\{cite:(\d+):([0-9a-fA-F-]{36})\}\}")
 # A trailing prefix that could still grow into a complete sentinel with more incoming
@@ -269,11 +272,30 @@ class ChatService:
                     if text_seen_this_round:
                         assistant_text_parts.append("\n\n")
                         yield SSEEnvelope(event="token", data=TokenEvent(text="\n\n"))
-        except httpx.HTTPStatusError as exc:
-            yield SSEEnvelope(event="error", data=ErrorEvent(detail=f"OpenRouter error: {exc}"))
+        except httpx.HTTPError:
+            # Covers both a real OpenRouter error status (HTTPStatusError) and a
+            # connection-level failure - unreachable host, timeout, DNS
+            # (RequestError/ConnectError/TimeoutException) - llm_router.query()
+            # doesn't distinguish them, and neither does the user-facing message:
+            # either way, no model is available to explain itself for this turn. Full
+            # exception logged server-side; the user only sees a clean, actionable
+            # summary, not a raw httpx repr.
+            logger.exception("OpenRouter request failed in ChatService.run()")
+            yield SSEEnvelope(
+                event="error",
+                data=ErrorEvent(
+                    detail="The AI service is unreachable right now. Please try again in a moment."
+                ),
+            )
             return
-        except UpstreamProviderError as exc:
-            yield SSEEnvelope(event="error", data=ErrorEvent(detail=str(exc)))
+        except UpstreamProviderError:
+            logger.exception("UpstreamProviderError in ChatService.run()")
+            yield SSEEnvelope(
+                event="error",
+                data=ErrorEvent(
+                    detail="The AI service is unreachable right now. Please try again in a moment."
+                ),
+            )
             return
 
         final_text = "".join(assistant_text_parts)

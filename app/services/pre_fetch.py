@@ -74,8 +74,10 @@ async def discover_scope(
                     )
                     for u in users[: settings.discovery_top_n]
                 ]
-        except httpx.HTTPStatusError:
-            pass  # Best-effort discovery, same reasoning as the activity pre-fetch below.
+        except httpx.HTTPError:
+            # Best-effort discovery (same reasoning as the activity pre-fetch below) -
+            # covers both a real error status and connection-level unreachability.
+            pass
 
     if github_client_instance is not None:
         try:
@@ -94,7 +96,7 @@ async def discover_scope(
                 scope.github_collaborators = [
                     GithubCollaboratorRef(login=c.login) for c in contributors
                 ]
-        except httpx.HTTPStatusError:
+        except httpx.HTTPError:
             pass
 
     return scope

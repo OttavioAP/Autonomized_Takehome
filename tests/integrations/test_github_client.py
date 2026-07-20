@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 
+import httpx
+import pytest
+
 from app.integrations.github_client import (
     build_client,
     get_issue_comments,
@@ -118,3 +121,17 @@ async def test_get_issue_comments_on_seeded_pr_returns_the_seeded_comment() -> N
         c.author_login == "autonomized2" and "unblocks the rest of Phase 3" in c.body
         for c in comments
     )
+
+
+async def test_get_recent_commits_unreachable_host_raises_httpx_http_error() -> None:
+    """GithubTool.execute() wraps httpx.HTTPError (both a real error status and a
+    connection-level failure - unreachable host, timeout, DNS) into ToolExecutionError;
+    this confirms the underlying client function actually raises that error family
+    for a genuine connection failure, not just a mocked one. 127.0.0.1:1 is a real,
+    immediate connection-refused failure (nothing listens there), not a mock.
+    """
+    client = build_client("irrelevant-token")
+    client.base_url = "http://127.0.0.1:1"
+    async with client:
+        with pytest.raises(httpx.HTTPError):
+            await get_recent_commits_by_author(client, REPO, "Autonomized1")

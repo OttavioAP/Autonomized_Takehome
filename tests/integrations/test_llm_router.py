@@ -45,6 +45,25 @@ async def test_query_unauthorized_raises_http_status_error() -> None:
                 pass
 
 
+async def test_query_unreachable_host_raises_httpx_http_error() -> None:
+    """A real connection-level failure (not an HTTP error status) - the gap
+    ChatService.run() previously didn't catch at all (only httpx.HTTPStatusError,
+    not the httpx.RequestError/ConnectError family). Points at localhost on a port
+    nothing listens on - a real connection-refused failure, immediate rather than
+    a multi-second timeout, not a mock.
+    """
+    client = build_client("sk-or-invalid-token")
+    client.base_url = "http://127.0.0.1:1"
+    async with client:
+        with pytest.raises(httpx.HTTPError):
+            async for _ in query(
+                client,
+                LLMModel.FAST,
+                [ChatMessage(role="user", content="hi")],
+            ):
+                pass
+
+
 class _WeatherParams(BaseModel):
     city: str
 
