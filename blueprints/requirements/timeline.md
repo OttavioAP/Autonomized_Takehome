@@ -88,14 +88,13 @@ Each phase below ends with a **hard gate**: write tests for that phase's code (p
 ### Phase 1 — JIRA/GitHub OAuth (`oauth-integration.md`)
 
 Everything else depends on this — no tool can execute without a real per-user token. Build in this order within the phase:
-1. Azure Key Vault provisioning (`scripts/azure/provision.sh` extended) + Managed Identity role assignment.
+1. Azure Key Vault provisioning (`scripts/azure/provision.sh` extended) + Managed Identity role assignment, plus granting the developer's own `az login` identity the same access (local dev uses the real Key Vault, no fallback — see `oauth-integration.md`'s Isolation model / Token storage sections).
 2. JIRA 3LO app registration + GitHub OAuth App registration (external, via each provider's console — same pattern as the Azure AD app registration already done).
 3. `app/config.py` changes (remove old JIRA/GitHub fields, add OAuth client id/secret/redirect-uri fields + `discovery_top_n`).
-4. `jira_client.py`/`github_client.py` rework (new `build_client` signatures).
-5. `app/api/oauth.py` (connect/disconnect routes) + the `/oauth/connect` mandatory gate, wired into `/auth/callback`'s redirect target.
-6. Local-dev Key Vault fallback (decide the open question from `oauth-integration.md`'s Explicitly-out-of-scope list, then implement it).
+4. `jira_client.py`/`github_client.py` rework (new `build_client` signatures, plus `jira_client.refresh_access_token` for silent refresh).
+5. `app/api/oauth.py` (connect/disconnect routes) + the `/oauth/connect` gate (fires on first login or after a disconnect/revocation, not every login — tokens now persist per user, see `oauth-integration.md`), wired into `/auth/callback`'s redirect target.
 
-Gate: integration tests hitting real JIRA/GitHub OAuth flows where feasible (the interactive authorize-code exchange can't be fully automated — test what can be tested headlessly: token storage/retrieval from Key Vault, client construction against a resolved cloud ID, disconnect clearing the secret) + a manual browser round-trip (connect both providers, confirm the gate blocks entry until both are connected, confirm disconnect works) before considering this phase done, mirroring how Azure SSO's own live-endpoint regression test + manual browser check worked earlier in this project.
+Gate: integration tests hitting real JIRA/GitHub OAuth flows where feasible (the interactive authorize-code exchange can't be fully automated — test what can be tested headlessly: token storage/retrieval from Key Vault keyed by `team_member_id`, client construction against a resolved cloud ID, the refresh-token grant actually rotating and updating both stored secrets, disconnect clearing the secret(s)) + a manual browser round-trip (connect both providers, confirm the gate blocks entry until both are connected, sign out and back in and confirm no reconnect is required, confirm disconnect works) before considering this phase done, mirroring how Azure SSO's own live-endpoint regression test + manual browser check worked earlier in this project.
 
 ### Phase 2 — Schema (`chat.md`'s Schema section)
 

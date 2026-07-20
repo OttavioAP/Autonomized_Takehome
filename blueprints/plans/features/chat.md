@@ -14,14 +14,18 @@ Three design decisions anchor everything below:
 
 ## Auth model for JIRA/GitHub calls (MVP scope)
 
-**Per-user OAuth, session-scoped — see `oauth-integration.md`.** Superseded from
+**Per-user OAuth, persisted per user — see `oauth-integration.md`.** Superseded from
 an earlier draft of this spec, which used a single shared service-account
 token (`JIRA_API_TOKEN`/`GITHUB_TOKEN` in `Settings`). Un-deferred from
 NMVP-FR-2 into MVP at the user's explicit request, once it became clear a
 shared credential didn't hold up once conversations could be about anyone on
 the team. Every JIRA/GitHub call now uses the logged-in user's own OAuth
-token, stored only in that session's row, never persisted past sign-out —
-`oauth-integration.md` has the full flow, schema, and client rework.
+token, stored in Key Vault keyed by `team_members.id` and surviving sign-out
+(revised mid-implementation from an initial session-scoped design once Key
+Vault was already the storage layer — see `oauth-integration.md`'s Isolation
+model section for the full reasoning, including JIRA's refresh-token
+handling this now requires) — `oauth-integration.md` has the full flow,
+schema, and client rework.
 
 ## Schema
 
@@ -38,6 +42,7 @@ Backs MVP-FR-8, replacing the current `local-dev-data/team_members.json`-only fi
 | `azure_upn` | text, unique | matches `UserSession.user_upn` — the join between "who's logged in" and "which team member is that" |
 | `jira_account_email` | text | |
 | `github_login` | text | |
+| `jira_cloud_id` | text, nullable | Resolved once via `accessible-resources` at `GET /oauth/jira/callback` time, reused by pre-fetch. `NULL` until the user connects JIRA. Lives here (per-user) rather than on `sessions` — see `oauth-integration.md`'s Token storage section, revised so JIRA/GitHub connections persist across logins rather than being re-earned every session. |
 
 ### `conversations`
 
@@ -96,11 +101,16 @@ Unique constraint: `(message_id, ordinal)` — structurally prevents ordinal col
 
 ## Schemas (`app/schemas/chat.py`)
 
-Also home to `JiraProjectRef`/`GithubRepoRef` (see `oauth-integration.md`'s
-Scope discovery section) — the pre-fetched top-10 project/repo shape rendered
-into the system prompt. Defined here rather than in `oauth-integration.md`'s
-own client-rework code, consistent with `ActivityItem`/`MessageOut` already
-living in this one schemas module for anything chat-prompt-facing.
+Also home to `JiraProjectRef`/`GithubRepoRef`/`GithubCollaboratorRef` (see
+`oauth-integration.md`'s Scope discovery section) — the pre-fetched top-10
+project/repo/collaborator shapes rendered into the system prompt.
+`GithubCollaboratorRef` is prompt context only (no tool accepts a
+collaborator identifier as a parameter — it exists so the model has
+pre-awareness of who it's likely to be asked about next, not so it can be
+handed back to a tool call the way `JiraProjectRef.key`/`GithubRepoRef.full_name`
+are). Defined here rather than in `oauth-integration.md`'s own client-rework
+code, consistent with `ActivityItem`/`MessageOut` already living in this one
+schemas module for anything chat-prompt-facing.
 
 ```python
 class ActivityKind(StrEnum):
@@ -178,15 +188,15 @@ This is genuinely deterministic code (no model call), reusing the same normalize
 
 ### `base.py` — `ActivityTool` (Protocol/ABC)
 
-Common interface every tool implements: `name: str`, `description: str`, `Params: type[BaseModel]` (the tool's own Pydantic parameters model — see `openrouter-integration.md`'s `ToolDefinition`, which every tool exposes via a `definition: ToolDefinition` property built from these three), `async def execute(self, session: AsyncSession, conversation_id: UUID, params: Params, **credentials) -> list[ActivityItem]`. Per `oauth-integration.md`, `execute()` also takes the session's provider token(s) as an explicit argument — tools never read credentials from `Settings` or fetch them themselves. `ChatService` resolves which tool's `Params` type to validate a given `ToolCall` against by matching `ToolCall.name` to `ActivityTool.name`.
+Common interface every tool implements: `name: str`, `description: str`, `Params: type[BaseModel]` (the tool's own Pydantic parameters model — see `openrouter-integration.md`'s `ToolDefinition`, which every tool exposes via a `definition: ToolDefinition` property built from these three), `async def execute(self, session: AsyncSession, conversation_id: UUID, params: Params, **credentials) -> list[ActivityItem]`. Per `oauth-integration.md`, `execute()` also takes the current user's provider token(s) as an explicit argument (resolved by the route from Key Vault, keyed by `team_member_id` — see `oauth-integration.md`'s Token storage section) — tools never read credentials from `Settings` or fetch them themselves. `ChatService` resolves which tool's `Params` type to validate a given `ToolCall` against by matching `ToolCall.name` to `ActivityTool.name`.
 
 ### `jira_tool.py` — `JiraTool`
 
-`class JiraToolParams(BaseModel): jira_account_email: str; project_key: str` — plain identifiers the model read out of the roster/pre-fetched project list in its own system prompt, not something it resolves itself. Wraps `jira_client.find_account_id_by_email` + `get_issues_assigned_to`, called with the session's JIRA OAuth token/cloud ID (`oauth-integration.md`). `execute()` does the email→account-id translation internally (existing two-step client shape), maps each `JiraIssue` to an `ActivityItem(kind=JIRA_TICKET, ...)`, and upserts into `activity_items` via `activity_item_repo` keyed on `(conversation_id, kind, external_id=issue.key)`.
+`class JiraToolParams(BaseModel): jira_account_email: str; project_key: str` — plain identifiers the model read out of the roster/pre-fetched project list in its own system prompt, not something it resolves itself. Wraps `jira_client.find_account_id_by_email` + `get_issues_assigned_to`, called with the current user's JIRA OAuth token/cloud ID (`oauth-integration.md`). `execute()` does the email→account-id translation internally (existing two-step client shape), maps each `JiraIssue` to an `ActivityItem(kind=JIRA_TICKET, ...)`, and upserts into `activity_items` via `activity_item_repo` keyed on `(conversation_id, kind, external_id=issue.key)`. On a 401, retries once after a silent refresh per `oauth-integration.md`'s JIRA refresh section before surfacing `ToolExecutionError`.
 
 ### `github_tool.py` — `GithubTool`
 
-`class GithubToolParams(BaseModel): github_login: str; repo: str`, same reasoning. Wraps `github_client.get_recent_commits_by_author` + `get_pull_requests_by_author`, called with the session's GitHub OAuth token (`oauth-integration.md`). Maps `GithubCommit`/`GithubPullRequest` to `ActivityItem(kind=GITHUB_COMMIT | GITHUB_PR, ...)`, upserts the same way.
+`class GithubToolParams(BaseModel): github_login: str; repo: str`, same reasoning. Wraps `github_client.get_recent_commits_by_author` + `get_pull_requests_by_author`, called with the current user's GitHub OAuth token (`oauth-integration.md`). Maps `GithubCommit`/`GithubPullRequest` to `ActivityItem(kind=GITHUB_COMMIT | GITHUB_PR, ...)`, upserts the same way.
 
 Neither tool does name resolution, fuzzy matching, or accepts a display name — the model is expected to have already resolved a display name to an email/login using the roster in context before calling either tool. If it hasn't (roster didn't contain a matching name), that's not a tool failure — the model simply says so in its own prose (MVP-FR-6's "member not found" state is model-generated text, not a thrown error).
 
