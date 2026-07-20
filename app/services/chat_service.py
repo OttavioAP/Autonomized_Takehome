@@ -5,6 +5,7 @@ per CLAUDE.md's transaction-ownership rule (the route commits once the generator
 driving run() is exhausted).
 """
 
+import asyncio
 import re
 from collections.abc import AsyncIterator
 from uuid import UUID
@@ -17,6 +18,7 @@ from app.config import Settings, get_settings
 from app.db.models.activity_item import ActivityItem as ActivityItemModel
 from app.db.models.message import MessageRole
 from app.db.models.team_member import TeamMember
+from app.db.session import db
 from app.prompts.loader import load_prompt
 from app.repositories import (
     activity_item_repo,
@@ -206,8 +208,10 @@ class ChatService:
 
                     tool_calls_made = False
                     stream_stopped = False
+                    text_seen_this_round = False
                     async for event in query(llm_client, LLMModel.CAPABLE, messages, tools=tools):
                         if isinstance(event, TextDelta):
+                            text_seen_this_round = True
                             assistant_text_parts.append(event.text)
                             async for envelope in self._process_text_delta(
                                 parser.feed(event.text), pending_citations
@@ -223,7 +227,24 @@ class ChatService:
                                     event="tool-status",
                                     data=ToolStatusEvent(message=_tool_status_message(call)),
                                 )
-                                result_text = await self._execute_tool_call(call, credentials)
+                            # Each call's HTTP fetch work runs concurrently. Every
+                            # coroutine gets its own AsyncSession (db._session_factory,
+                            # not self._session) and commits it independently -
+                            # SQLAlchemy's AsyncSession is not safe for concurrent use
+                            # from multiple coroutines, so sharing self._session across
+                            # gather() branches would corrupt state. This is a separate
+                            # transaction from the route's outer one (which only ever
+                            # covered persisting the user/assistant messages +
+                            # citations, never the activity_items upserts, which were
+                            # already flush()-committed-in-effect per upsert() before
+                            # this change too).
+                            results = await asyncio.gather(
+                                *(
+                                    self._execute_tool_call(call, credentials)
+                                    for call in event.calls
+                                )
+                            )
+                            for call, result_text in zip(event.calls, results, strict=True):
                                 messages.append(
                                     ChatMessage(
                                         role="tool", content=result_text, tool_call_id=call.id
@@ -238,6 +259,16 @@ class ChatService:
 
                     if forced_final_round or stream_stopped or not tool_calls_made:
                         break
+
+                    # Bridge the gap between "text streamed before this round's tool
+                    # calls" (or the tool-status line) and the next round's answer -
+                    # without this, a leg like "I'll fetch Sarah's activity." followed
+                    # immediately by "Sarah is working on..." renders with no
+                    # separating whitespace at all, since neither the model's own
+                    # output nor the SSE framing naturally inserts one.
+                    if text_seen_this_round:
+                        assistant_text_parts.append("\n\n")
+                        yield SSEEnvelope(event="token", data=TokenEvent(text="\n\n"))
         except httpx.HTTPStatusError as exc:
             yield SSEEnvelope(event="error", data=ErrorEvent(detail=f"OpenRouter error: {exc}"))
             return
@@ -297,33 +328,44 @@ class ChatService:
         except ValidationError as exc:
             return f"Error: invalid arguments for {call.name}: {exc}"
 
+        # A dedicated session/connection for this call, not self._session - tool calls
+        # in the same round run concurrently via asyncio.gather (see run()), and
+        # AsyncSession is not safe for concurrent use from multiple coroutines. This
+        # session commits its own upserts independently of the route's outer
+        # transaction; a later read through self._session (e.g. citation validation)
+        # sees them once committed, same READ COMMITTED visibility Postgres already
+        # gives any other committed transaction.
         try:
             if isinstance(tool, JiraTool):
                 if credentials.jira_access_token is None or credentials.jira_cloud_id is None:
                     return "Error: JIRA is not connected for this user."
                 assert isinstance(params, JiraToolParams)
-                results = await tool.execute(
-                    self._session,
-                    self._conversation_id,
-                    params,
-                    team_member_id=str(credentials.team_member_id),
-                    access_token=credentials.jira_access_token,
-                    refresh_token=credentials.jira_refresh_token or "",
-                    cloud_id=credentials.jira_cloud_id,
-                    site_url=credentials.jira_site_url or "",
-                    jira_oauth_client_id=get_settings().jira_oauth_client_id,
-                    jira_oauth_client_secret=get_settings().jira_oauth_client_secret,
-                )
+                async with db.new_session() as tool_session:
+                    results = await tool.execute(
+                        tool_session,
+                        self._conversation_id,
+                        params,
+                        team_member_id=str(credentials.team_member_id),
+                        access_token=credentials.jira_access_token,
+                        refresh_token=credentials.jira_refresh_token or "",
+                        cloud_id=credentials.jira_cloud_id,
+                        site_url=credentials.jira_site_url or "",
+                        jira_oauth_client_id=get_settings().jira_oauth_client_id,
+                        jira_oauth_client_secret=get_settings().jira_oauth_client_secret,
+                    )
+                    await tool_session.commit()
             else:
                 if credentials.github_access_token is None:
                     return "Error: GitHub is not connected for this user."
                 assert isinstance(params, GithubToolParams)
-                results = await tool.execute(
-                    self._session,
-                    self._conversation_id,
-                    params,
-                    access_token=credentials.github_access_token,
-                )
+                async with db.new_session() as tool_session:
+                    results = await tool.execute(
+                        tool_session,
+                        self._conversation_id,
+                        params,
+                        access_token=credentials.github_access_token,
+                    )
+                    await tool_session.commit()
         except ToolExecutionError as exc:
             return f"Error: {exc}"
 

@@ -3,29 +3,19 @@
 {% block extra_head %}
     <link rel="stylesheet" href="{{ url_for('static', path='css/chat.css') }}" />
 {% endblock extra_head %}
-{% block content %}
-    <nav>
+{% block navbar %}
+    <nav class="app-navbar">
         <ul>
+            <li>
+                <button type="button"
+                        id="sidebar-toggle"
+                        class="sidebar-toggle"
+                        aria-label="Toggle conversations"
+                        aria-expanded="true">☰</button>
+            </li>
             <li><strong>Team Activity Monitor</strong></li>
         </ul>
         <ul>
-            <li>
-                <details class="dropdown">
-                    <summary>Conversations</summary>
-                    <ul>
-                        {% for conversation in conversations %}
-                            <li>
-                                <a href="{{ url_for('conversation_view', conversation_id=conversation.id) }}">{{ conversation.title or "New conversation" }}</a>
-                            </li>
-                        {% endfor %}
-                        <li>
-                            <form method="post" action="{{ url_for('create_conversation') }}">
-                                <button type="submit" class="secondary">+ New conversation</button>
-                            </form>
-                        </li>
-                    </ul>
-                </details>
-            </li>
             <li>{{ current_user.user_display_name }}</li>
             <li>
                 <form method="post" action="{{ url_for('logout') }}">
@@ -35,22 +25,40 @@
             </li>
         </ul>
     </nav>
-    <div class="chat-log" id="chat-log">
-        {% for message in messages %}
-            {% include "chat/_message.html" %}
-        {% endfor %}
+{% endblock navbar %}
+{% block content %}
+    <div class="chat-layout" id="chat-layout">
+        <aside class="conversations-sidebar" id="conversations-sidebar">
+            <form method="post" action="{{ url_for('create_conversation') }}">
+                <button type="submit" class="secondary">+ New conversation</button>
+            </form>
+            <ul class="conversations-list">
+                {% for conversation in conversations %}
+                    <li class="{{ 'is-active' if conversation.id == conversation_id else '' }}">
+                        <a href="{{ url_for('conversation_view', conversation_id=conversation.id) }}">{{ conversation.title or "New conversation" }}</a>
+                    </li>
+                {% endfor %}
+            </ul>
+        </aside>
+        <div class="chat-main">
+            <div class="chat-log" id="chat-log">
+                {% for message in messages %}
+                    {% include "chat/_message.html" %}
+                {% endfor %}
+            </div>
+            <form id="chat-form" autocomplete="off">
+                <input type="hidden" id="csrf-token" value="{{ current_user.csrf_token }}" />
+                <fieldset role="group">
+                    <input type="text"
+                           id="chat-input"
+                           name="query"
+                           placeholder="What is Sarah working on these days?"
+                           required />
+                    <button type="submit">Send</button>
+                </fieldset>
+            </form>
+        </div>
     </div>
-    <form id="chat-form" autocomplete="off">
-        <input type="hidden" id="csrf-token" value="{{ current_user.csrf_token }}" />
-        <fieldset role="group">
-            <input type="text"
-                   id="chat-input"
-                   name="query"
-                   placeholder="What is Sarah working on these days?"
-                   required />
-            <button type="submit">Send</button>
-        </fieldset>
-    </form>
     <script>
         // Vanilla SSE-over-POST: htmx-ext-sse is GET-oriented, but this endpoint is a
         // CSRF-protected POST, so we drive the stream ourselves via fetch + a streaming
@@ -60,6 +68,17 @@
         const log = document.getElementById("chat-log");
         const csrfToken = document.getElementById("csrf-token").value;
         const conversationId = {{ conversation_id | string | tojson }};
+
+        const sidebarToggle = document.getElementById("sidebar-toggle");
+        const chatLayout = document.getElementById("chat-layout");
+        sidebarToggle.addEventListener("click", () => {
+            const collapsed = chatLayout.classList.toggle("sidebar-collapsed");
+            sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+        });
+
+        function scrollToLatest() {
+            log.scrollTop = log.scrollHeight;
+        }
 
         function bubble(role) {
             const div = document.createElement("div");
@@ -72,8 +91,20 @@
             div.appendChild(roleEl);
             div.appendChild(content);
             log.appendChild(div);
-            log.scrollTop = log.scrollHeight;
+            scrollToLatest();
             return content;
+        }
+
+        function throbber() {
+            const div = document.createElement("div");
+            div.className = "chat-bubble chat-bubble--assistant chat-bubble--pending";
+            const dots = document.createElement("div");
+            dots.className = "throbber";
+            dots.innerHTML = "<span></span><span></span><span></span>";
+            div.appendChild(dots);
+            log.appendChild(div);
+            scrollToLatest();
+            return div;
         }
 
         function pill(item) {
@@ -100,8 +131,17 @@
             input.value = "";
 
             bubble("user").textContent = query;
-            const assistant = bubble("assistant");
+            const pending = throbber();
+            let assistant = null;
             let toolStatus = null;
+
+            function ensureAssistantBubble() {
+                if (!assistant) {
+                    pending.remove();
+                    assistant = bubble("assistant");
+                }
+                return assistant;
+            }
 
             const body = new URLSearchParams({ query, csrf_token: csrfToken });
             const resp = await fetch(`/conversations/${conversationId}/chat`, {
@@ -131,18 +171,22 @@
                     if (!dataLine) continue;
                     const data = JSON.parse(dataLine);
                     if (eventName === "token") {
+                        ensureAssistantBubble();
                         if (toolStatus) { toolStatus.remove(); toolStatus = null; }
                         assistant.appendChild(document.createTextNode(data.text));
                     } else if (eventName === "cite") {
+                        ensureAssistantBubble();
                         if (toolStatus) { toolStatus.remove(); toolStatus = null; }
                         assistant.appendChild(pill(data.item));
                     } else if (eventName === "cite-error") {
+                        ensureAssistantBubble();
                         const span = document.createElement("span");
                         span.className = "cite-error";
                         span.title = data.detail;
                         span.textContent = "[" + data.ordinal + ": unresolved citation]";
                         assistant.appendChild(span);
                     } else if (eventName === "tool-status") {
+                        ensureAssistantBubble();
                         if (!toolStatus) {
                             toolStatus = document.createElement("p");
                             toolStatus.className = "tool-status";
@@ -150,14 +194,16 @@
                         }
                         toolStatus.textContent = data.message;
                     } else if (eventName === "error") {
+                        ensureAssistantBubble();
                         const p = document.createElement("p");
                         p.className = "chat-error";
                         p.textContent = data.detail;
                         assistant.appendChild(p);
                     }
-                    log.scrollTop = log.scrollHeight;
+                    scrollToLatest();
                 }
             }
+            pending.remove();
         });
     </script>
 {% endblock content %}

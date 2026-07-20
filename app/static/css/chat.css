@@ -1,11 +1,99 @@
-/* Chat UI: bubbles, inline activity pills, tool-status line, cite-error marker.
-   Complements Pico.css's classless element styling rather than overriding it. */
+/* Chat UI: navbar, collapsible sidebar, bubbles, inline activity pills,
+   tool-status line, cite-error marker. Complements Pico.css's classless
+   element styling rather than overriding it. */
+
+.app-navbar {
+    padding: 0.75rem 1.5rem;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    margin-bottom: 0;
+}
+
+.sidebar-toggle {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    color: inherit;
+}
+
+.chat-layout {
+    display: grid;
+    grid-template-columns: 16rem 1fr;
+    gap: 1.5rem;
+    align-items: start;
+    /* Fills the viewport below the navbar so the chat log's own scroll region
+       (not the page body) is what grows/scrolls as messages accumulate. */
+    height: calc(100vh - 8rem);
+}
+
+.chat-layout.sidebar-collapsed {
+    grid-template-columns: 0 1fr;
+}
+
+.conversations-sidebar {
+    overflow: hidden;
+    height: 100%;
+    overflow-y: auto;
+    border-right: 1px solid var(--pico-muted-border-color);
+    padding-right: 1rem;
+    transition: opacity 0.15s ease;
+}
+
+.chat-layout.sidebar-collapsed .conversations-sidebar {
+    opacity: 0;
+    pointer-events: none;
+    padding-right: 0;
+    border-right: none;
+}
+
+.conversations-list {
+    list-style: none;
+    margin: 1rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.conversations-list li a {
+    display: block;
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--pico-border-radius, 0.5rem);
+    text-decoration: none;
+    color: inherit;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.conversations-list li a:hover {
+    background: var(--pico-secondary-background, var(--pico-muted-border-color));
+}
+
+.conversations-list li.is-active a {
+    background: var(--pico-primary-background, var(--pico-primary));
+    color: var(--pico-primary-inverse, #fff);
+}
+
+.chat-main {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
 
 .chat-log {
     display: flex;
     flex-direction: column;
     gap: 1rem;
     margin-bottom: 1.5rem;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    padding-right: 0.25rem;
 }
 
 .chat-bubble {
@@ -45,7 +133,52 @@
     line-height: 1.5;
 }
 
-/* Pills render inline within flowing message text, not as a trailing block. */
+.chat-bubble--pending {
+    display: flex;
+    align-items: center;
+    padding: 1rem;
+}
+
+.throbber {
+    display: flex;
+    gap: 0.3rem;
+}
+
+.throbber span {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--pico-muted-color, currentColor);
+    opacity: 0.5;
+    animation: throbber-bounce 1.1s ease-in-out infinite;
+}
+
+.throbber span:nth-child(2) {
+    animation-delay: 0.15s;
+}
+
+.throbber span:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
+@keyframes throbber-bounce {
+
+    0%,
+    80%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+
+    40% {
+        transform: translateY(-0.3rem);
+        opacity: 1;
+    }
+}
+
+/* Pills render inline within flowing message text, not as a trailing block.
+   Underline + pointer + a hover lift/shadow signal "this is a link", since the
+   pill shape alone (no default link underline) doesn't read as clickable. */
 .activity-pill {
     display: inline-block;
     padding: 0.05rem 0.5rem;
@@ -53,9 +186,26 @@
     border-radius: 999px;
     font-size: 0.85em;
     font-weight: 600;
-    text-decoration: none;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
     white-space: nowrap;
     vertical-align: baseline;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: transform 0.1s ease, box-shadow 0.1s ease, border-color 0.1s ease;
+}
+
+.activity-pill:hover,
+.activity-pill:focus-visible {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    text-decoration: underline;
+}
+
+.activity-pill:active {
+    transform: translateY(0);
+    box-shadow: none;
 }
 
 .activity-pill--jira {
@@ -63,9 +213,21 @@
     color: #0052cc;
 }
 
+.activity-pill--jira:hover,
+.activity-pill--jira:focus-visible {
+    background: #c3ddff;
+    border-color: #0052cc;
+}
+
 .activity-pill--github {
     background: #ddf4ff;
     color: #0969da;
+}
+
+.activity-pill--github:hover,
+.activity-pill--github:focus-visible {
+    background: #c2eaff;
+    border-color: #0969da;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -74,9 +236,21 @@
         color: #7ab0ff;
     }
 
+    .activity-pill--jira:hover,
+    .activity-pill--jira:focus-visible {
+        background: #26375e;
+        border-color: #7ab0ff;
+    }
+
     .activity-pill--github {
         background: #122634;
         color: #6cb6ff;
+    }
+
+    .activity-pill--github:hover,
+    .activity-pill--github:focus-visible {
+        background: #193347;
+        border-color: #6cb6ff;
     }
 }
 

@@ -12,6 +12,8 @@
         <script src="{{ url_for('static', path='vendor/htmx-ext-sse.js') }}" defer></script>
     </head>
     <body>
+        {% block navbar %}
+        {% endblock navbar %}
         <main class="container">
             {% block content %}
             {% endblock content %}

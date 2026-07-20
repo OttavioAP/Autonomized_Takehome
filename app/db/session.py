@@ -20,6 +20,14 @@ class Database:
         async with self._session_factory() as session:
             yield session
 
+    def new_session(self) -> AsyncSession:
+        """A standalone session outside the FastAPI Depends() lifecycle - for callers
+        that need their own independent transaction (e.g. concurrent work sharing no
+        session, since AsyncSession isn't safe for concurrent use from multiple
+        coroutines). Caller is responsible for commit/close, typically via
+        `async with`."""
+        return self._session_factory()
+
     async def dispose(self) -> None:
         await self._engine.dispose()
 
