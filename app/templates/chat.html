@@ -19,6 +19,9 @@
         <ul>
             <li>{{ current_user.user_display_name }}</li>
             <li>
+                <a href="{{ url_for('connect_page') }}" role="button" class="secondary">Connections</a>
+            </li>
+            <li>
                 <form method="post" action="{{ url_for('logout') }}">
                     <input type="hidden" name="csrf_token" value="{{ current_user.csrf_token }}" />
                     <button type="submit" class="secondary">Sign out</button>

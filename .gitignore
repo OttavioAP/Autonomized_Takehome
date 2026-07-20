@@ -7,3 +7,4 @@ __pycache__/
 scripts/azure/.state
 scripts/azure/.state.pgpass
 test_user_accounts.txt
+question_prep.md

@@ -18,7 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependency import get_current_user
 from app.config import get_settings
 from app.db.models.session import UserSession
+from app.db.models.team_member import TeamMember
 from app.db.session import db
+from app.integrations import github_client
 from app.repositories import team_member_repo
 from app.services import token_store
 from app.templating import templates
@@ -38,7 +40,7 @@ JIRA_SCOPES = "read:jira-work read:jira-user offline_access"
 GITHUB_SCOPES = "repo"
 
 
-async def _get_team_member_id(session: AsyncSession, current_user: UserSession) -> Any:
+async def _get_team_member(session: AsyncSession, current_user: UserSession) -> TeamMember:
     """Every route below needs the team_members row backing the current Azure session -
     same azure_upn join chat.md's pre-fetch uses. 404s rather than 401ing since the user
     IS authenticated (Azure SSO passed); they're just not a seeded team member, a
@@ -49,7 +51,11 @@ async def _get_team_member_id(session: AsyncSession, current_user: UserSession) 
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="No team member record for this account"
         )
-    return team_member.id
+    return team_member
+
+
+async def _get_team_member_id(session: AsyncSession, current_user: UserSession) -> Any:
+    return (await _get_team_member(session, current_user)).id
 
 
 @router.get("/connect")
@@ -200,7 +206,7 @@ async def github_callback(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
 
     settings = get_settings()
-    team_member_id = await _get_team_member_id(db_session, current_user)
+    team_member = await _get_team_member(db_session, current_user)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         token_resp = await client.post(
@@ -224,7 +230,27 @@ async def github_callback(
             detail=f"GitHub token exchange failed: {tokens.get('error', 'unknown error')}",
         )
 
-    await token_store.store_github_token(team_member_id, tokens["access_token"])
+    # GitHub's consent screen silently reuses whichever GitHub account is already
+    # logged into the browser - there's no server-side way to force an account
+    # picker the way Azure AD's prompt=select_account does (see auth/oidc.py) - so a
+    # real, previously-hit failure mode is authorizing as the wrong GitHub account
+    # with no error anywhere in the flow. Catch it here: reject a mismatch outright
+    # rather than silently storing a token for the wrong person.
+    github_http_client = github_client.build_client(tokens["access_token"])
+    async with github_http_client:
+        authenticated_login = await github_client.get_authenticated_login(github_http_client)
+    if authenticated_login.lower() != team_member.github_login.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"You authorized GitHub as '{authenticated_login}', but "
+                f"{team_member.display_name} should connect as "
+                f"'{team_member.github_login}'. Sign out of GitHub in this browser "
+                "(or use a private/incognito window) and try Connect again."
+            ),
+        )
+
+    await token_store.store_github_token(team_member.id, tokens["access_token"])
 
     response = RedirectResponse(url="/oauth/connect", status_code=status.HTTP_302_FOUND)
     response.delete_cookie(OAUTH_STATE_COOKIE_NAME)

@@ -52,6 +52,20 @@ class GithubContributor(BaseModel):
     contributions: int
 
 
+async def get_authenticated_login(client: httpx.AsyncClient) -> str:
+    """The GitHub login the given token actually authenticates as - GitHub's OAuth
+    consent screen silently reuses whichever GitHub account is already logged into
+    the browser (no server-side way to force an account picker, unlike Azure AD's
+    prompt=select_account), so a caller can end up connecting the wrong account with
+    no error at any point in the flow. This is the one reliable way to catch that:
+    ask GitHub who the token actually belongs to, right after the exchange.
+    """
+    resp = await client.get("/user")
+    resp.raise_for_status()
+    login: str = resp.json()["login"]
+    return login
+
+
 def build_client(token: str) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url="https://api.github.com",
