@@ -13,10 +13,11 @@ RUN pip install --no-cache-dir -r requirements.lock.txt
 
 COPY . .
 RUN pip install --no-cache-dir -e . --no-deps \
+    && chmod +x entrypoint.sh \
     && chown -R appuser:appuser /app
 
 USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--proxy-headers", "--forwarded-allow-ips=*"]
+CMD ["./entrypoint.sh"]

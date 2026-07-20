@@ -209,6 +209,25 @@ added `scripts/azure/set-secret.sh` as the one reviewed path for setting
 secrets going forward — see the SSO section below and the CHANGELOG entry for
 this date.
 
+**Bug #3: prod database never migrated.** `deploy.yml`'s `test` job runs
+`alembic upgrade head` against a throwaway CI Postgres container, not the real
+Azure Postgres Flexible Server — so every migration since the very first deploy
+had silently never been applied to prod. Went unnoticed until the `sessions`
+table (added for SSO) didn't exist in prod and login's callback route 500'd
+trying to write to it. Considered adding a discrete migration step to
+`deploy.yml`, but Postgres Flexible Server's firewall only allows Azure-internal
+traffic (`AllowAllAzureServicesAndResourcesWithinAzureIps`), which a
+GitHub-hosted runner doesn't satisfy — would have needed either a public
+firewall rule (a real tradeoff on a DB otherwise only reachable from inside
+Azure) or routing through Kudu's in-Azure command API. Fixed more simply
+instead: migrations now run as part of every container boot (`entrypoint.sh`,
+wired as the `Dockerfile`'s `CMD`), local and deployed alike — no network path
+to reason about at all, since the migration runs from wherever the app itself
+already runs. Diagnosed via `az webapp log config --application-logging
+filesystem` (previously off) + `az webapp log tail`, reproduced directly with
+curl against a real session cookie rather than needing another live browser
+round-trip.
+
 ## Azure AD SSO provisioning (MVP-FR-1/FR-2, MVP-NFR-2 prerequisite)
 
 Provisioned ahead of implementing the actual login/logout routes, since
