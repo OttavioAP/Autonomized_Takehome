@@ -2,6 +2,26 @@
 
 Most recent entry at the top. One entry per meaningful change — new/updated requirements, architecture decisions, or implementation milestones.
 
+## 2026-07-21 (Fix: multi-turn context was never fed to the model; prompt now surfaces tool failures)
+
+- **Multi-turn conversation context bug (MVP-FR-7)**: `ChatService.run()` built its
+  LLM message list from only the system prompt + the current query, so the model never
+  saw earlier turns in the same conversation — follow-ups like "try again" or "what
+  about jira?" had zero memory of what came before. (History *was* persisted and
+  replayed in the UI via `list_out_for_conversation`; it was just never handed to the
+  model.) Fixed by loading `message_repo.list_for_conversation` and splicing prior
+  turns between the system prompt and the current user turn, stripping embedded
+  `{{cite:...}}` sentinels first via the new `_strip_cite_sentinels` helper (the
+  sentinel is an output protocol, not input the model should echo). New tests:
+  `test_run_replays_prior_conversation_history`, `test_strip_cite_sentinels_*`.
+  Corrected the MVP-FR-7 tracker row, which had overclaimed this as done.
+- **Tool-failure visibility (MVP-FR-11)**: `chat_system_prompt.md` now tells the model
+  to surface a failed JIRA/GitHub fetch to the user (account not connected, or an
+  upstream error) instead of silently dropping that platform or pretending the person
+  has no activity — explicitly distinguishing an `Error:` tool result from a
+  successful-but-empty one, and instructing it to answer from whichever platform
+  succeeded while naming the one it couldn't reach.
+
 ## 2026-07-21 (MVP fully complete: UI/UX pass, error handling, real identity linking, richer seed data, markdown rendering)
 
 One consolidated entry for a long session's worth of commits (dozens of pushes,

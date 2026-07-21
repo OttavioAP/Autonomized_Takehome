@@ -12,6 +12,7 @@ tests/integrations/test_llm_router.py's own stance on live tool-call tests.
 """
 
 import os
+from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 
 from app.db.session import db
@@ -24,6 +25,7 @@ from app.repositories import (
 from app.schemas.chat import CiteEvent, TokenEvent
 from app.services import token_store
 from app.services.chat_service import ChatService
+from app.services.llm_router import ChatMessage
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -137,6 +139,76 @@ async def test_validate_citation_valid_uuid_yields_cite_event() -> None:
     assert envelope.data.ordinal == 1
     assert envelope.data.item.id == item.id
     assert len(pending) == 1
+
+
+def test_strip_cite_sentinels_removes_sentinels_leaving_prose() -> None:
+    """History replay feeds prior assistant turns back to the model with their
+    {{cite:...}} sentinels stripped (the sentinel is an output protocol, not input). A
+    stored answer with an embedded sentinel must come back as clean prose, and ordinary
+    text must pass through untouched."""
+    import uuid as uuid_module
+
+    from app.services.chat_service import _strip_cite_sentinels
+
+    some_uuid = str(uuid_module.uuid4())
+    stored = f"Sarah is working on PR #1{{{{cite:1:{some_uuid}}}}} in the demo repo."
+    assert _strip_cite_sentinels(stored) == "Sarah is working on PR #1 in the demo repo."
+    # No sentinel -> unchanged.
+    assert _strip_cite_sentinels("Just plain prose.") == "Just plain prose."
+
+
+_CAPTURED_QUERY_MESSAGES: list[ChatMessage] = []
+
+
+async def _capture_query(
+    client: object, model: object, messages: Sequence[ChatMessage], tools: object = None
+) -> AsyncIterator[object]:
+    """Stand-in for llm_router.query: records the ChatMessage list it was handed and
+    yields nothing (an empty async generator, so ChatService.run's `async for` completes
+    immediately). Module-level to avoid closing over a loop variable."""
+    _CAPTURED_QUERY_MESSAGES.clear()
+    _CAPTURED_QUERY_MESSAGES.extend(messages)
+    return
+    yield  # unreachable; makes this an async generator
+
+
+async def test_run_replays_prior_conversation_history() -> None:
+    """The regression guard for the missing-context bug: ChatService.run() must load the
+    conversation's prior messages and hand them to the model, not just the current turn.
+    Asserted at the message-assembly boundary (the ChatMessage list passed into query())
+    so it's deterministic and doesn't depend on the live model actually 'remembering'."""
+    import app.services.chat_service as chat_service_module
+    from app.db.models.message import MessageRole
+    from app.services.chat_service import ChatService as ChatServiceClass
+
+    async for session in db.get_session():
+        john = await team_member_repo.get_by_azure_upn(
+            session, "john@ottavioantperuzzigmail.onmicrosoft.com"
+        )
+        assert john is not None
+        conversation = await conversation_repo.create(session, john.id)
+        # A prior turn already exists in this conversation.
+        await message_repo.create(session, conversation.id, MessageRole.USER, "Who is on the team?")
+        await message_repo.create(
+            session, conversation.id, MessageRole.ASSISTANT, "John, Sarah, and Mike."
+        )
+        await session.commit()
+
+        original_query = chat_service_module.query
+        chat_service_module.query = _capture_query  # type: ignore[assignment]
+        try:
+            service = ChatServiceClass(session, conversation.id)
+            async for _ in service.run("And what is Mike working on?"):
+                pass
+        finally:
+            chat_service_module.query = original_query
+
+    roles_and_content = [(m.role, m.content) for m in _CAPTURED_QUERY_MESSAGES]
+    # System prompt first, then the two prior turns, then the current user query last.
+    assert roles_and_content[0][0] == "system"
+    assert ("user", "Who is on the team?") in roles_and_content
+    assert ("assistant", "John, Sarah, and Mike.") in roles_and_content
+    assert roles_and_content[-1] == ("user", "And what is Mike working on?")
 
 
 async def test_validate_citation_unknown_uuid_yields_cite_error() -> None:

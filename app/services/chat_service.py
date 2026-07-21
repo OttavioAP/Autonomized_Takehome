@@ -9,6 +9,7 @@ import asyncio
 import logging
 import re
 from collections.abc import AsyncIterator
+from typing import Literal, cast
 from uuid import UUID
 
 import httpx
@@ -70,6 +71,16 @@ _CITE_SENTINEL_RE = re.compile(r"\{\{cite:(\d+):([0-9a-fA-F-]{36})\}\}")
 _PARTIAL_SENTINEL_RE = re.compile(
     r"\{(\{(c(i(t(e(:(\d+(:([0-9a-fA-F-]{36}\}?|[0-9a-fA-F-]{0,35}))?)?)?)?)?)?)?)?$"
 )
+
+
+def _strip_cite_sentinels(text: str) -> str:
+    """Remove `{{cite:ordinal:uuid}}` sentinels from stored message content before
+    replaying it as history to the model. The sentinel is an output-side protocol the
+    live stream parser consumes (CitationStreamParser); it carries no prose, so dropping
+    it leaves the surrounding sentence intact and keeps the model from ever echoing a raw
+    sentinel back as if it were normal text."""
+    return _CITE_SENTINEL_RE.sub("", text)
+
 
 _TOOLS: dict[str, ActivityTool] = {
     JiraTool().name: JiraTool(),
@@ -174,6 +185,13 @@ class ChatService:
         if team_member is None:
             raise ValueError(f"No team_members row for id={conversation.team_member_id}")
 
+        # Read prior turns BEFORE persisting this one, so the current query_text isn't
+        # duplicated (it's appended explicitly as the final user turn below). Oldest-first
+        # per list_for_conversation()'s contract.
+        history_rows = await message_repo.list_for_conversation(
+            self._session, self._conversation_id
+        )
+
         await message_repo.create(
             self._session, self._conversation_id, MessageRole.USER, query_text
         )
@@ -192,8 +210,19 @@ class ChatService:
                     team_members, team_member, own_activity_rows, scope
                 ),
             ),
-            ChatMessage(role="user", content=query_text),
         ]
+        # Replay the conversation so far. Stored content carries {{cite:...}} sentinels
+        # (see Message.content); strip them to their citable label form before feeding
+        # history back to the model - the sentinels are an output protocol, not input the
+        # model should ever see or try to reproduce verbatim from a past turn.
+        for row in history_rows:
+            messages.append(
+                ChatMessage(
+                    role=cast(Literal["user", "assistant", "system"], row.role.value),
+                    content=_strip_cite_sentinels(row.content),
+                )
+            )
+        messages.append(ChatMessage(role="user", content=query_text))
 
         assistant_text_parts: list[str] = []
         pending_citations: list[tuple[int, ActivityItemOut]] = []
