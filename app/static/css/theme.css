@@ -65,19 +65,24 @@ body {
     min-height: 100dvh;
 }
 
-/* Pages whose <main> needs to fill the remaining viewport height exactly (the
-   chat page's own scroll region depends on this) opt in via .chat-page rather
-   than every page paying for it - most pages (login, oauth-connect) just want
-   normal document flow. Cancels Pico's .container horizontal padding too,
-   since the chat layout manages its own gutters (navbar/sidebar/composer)
-   instead of inheriting Pico's fluid breakpoint padding, which was the root
-   cause of the layout overflowing narrower viewports (a hardcoded
-   negative-margin trick tried to compensate for that padding and didn't
-   track it correctly at every breakpoint). */
-main.container.chat-page {
+/* Every page's <main> grows to fill whatever height body's flex column has left
+   after the navbar, so a page that wants to center/fill vertically (.auth-shell
+   below) has a real flexed parent instead of a content-sized one - without this,
+   .auth-shell's own flex: 1 has nothing to stretch into. */
+main.container {
     flex: 1;
     min-height: 0;
     display: flex;
+    flex-direction: column;
+}
+
+/* .chat-page additionally fills 100% width/no padding, since the chat layout
+   manages its own gutters (navbar/sidebar/composer) instead of inheriting
+   Pico's fluid breakpoint padding - that padding mismatch was the root cause
+   of the layout overflowing narrower viewports (a hardcoded negative-margin
+   trick tried to compensate for it and didn't track it correctly at every
+   breakpoint). */
+main.container.chat-page {
     width: 100%;
     max-width: none;
     padding: 0;
@@ -107,8 +112,14 @@ main.container.chat-page {
 }
 
 /* ---------- Centered auth screens (login, oauth-connect) ---------- */
+/* Fills whatever height <main> has left via body's own flex column (see
+   html/body rules above) instead of computing the viewport itself - a fixed
+   `calc(100vh - 2rem)` assumed no navbar (only true for login.html), so once
+   oauth_connect.html grew a real navbar the page ran taller than the
+   viewport. flex: 1 adapts to either case with no navbar-height guess. */
 .auth-shell {
-    min-height: calc(100vh - 2rem);
+    flex: 1;
+    min-height: 0;
     display: flex;
     align-items: center;
     justify-content: center;

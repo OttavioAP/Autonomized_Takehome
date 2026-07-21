@@ -3,13 +3,13 @@
 {% block navbar %}
     <nav class="app-navbar">
         <ul>
+            <li>
+                <a href="{{ url_for('index') }}" role="button" class="secondary">← Back to chat</a>
+            </li>
             <li><strong>Team Activity Monitor</strong></li>
         </ul>
         <ul>
             <li>{{ current_user.user_display_name }}</li>
-            <li>
-                <a href="{{ url_for('index') }}" role="button" class="secondary">Back to chat</a>
-            </li>
             <li>
                 <form method="post" action="{{ url_for('logout') }}">
                     <input type="hidden" name="csrf_token" value="{{ current_user.csrf_token }}" />
