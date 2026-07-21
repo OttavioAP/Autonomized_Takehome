@@ -188,6 +188,13 @@ async def github_connect(
         "redirect_uri": settings.github_oauth_redirect_uri,
         "scope": GITHUB_SCOPES,
         "state": state,
+        # Without this, GitHub silently reuses whichever account is already logged
+        # into the browser, with no prompt at all - previously believed to have no
+        # fix (see the now-corrected comment in github_callback below); GitHub's own
+        # OAuth docs do document this parameter, same mechanism as Azure AD's
+        # prompt=select_account in auth/oidc.py. Forces the account picker every
+        # time instead of silently continuing as the active session.
+        "prompt": "select_account",
     }
     response = RedirectResponse(
         url=f"{GITHUB_AUTHORIZE_URL}?{urlencode(params)}", status_code=status.HTTP_302_FOUND
