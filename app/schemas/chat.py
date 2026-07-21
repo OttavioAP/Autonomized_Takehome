@@ -11,9 +11,13 @@ from pydantic import BaseModel
 class ActivityKind(StrEnum):
     JIRA_TICKET = "jira_ticket"
     JIRA_COMMENT = "jira_comment"
+    JIRA_PROJECT = "jira_project"
+    JIRA_PERSON = "jira_person"
     GITHUB_COMMIT = "github_commit"
     GITHUB_PR = "github_pr"
     GITHUB_COMMENT = "github_comment"
+    GITHUB_REPO = "github_repo"
+    GITHUB_USER = "github_user"
 
 
 class ActivityItem(BaseModel):
@@ -81,9 +85,14 @@ class SSEEnvelope(BaseModel):
 
 
 # Pre-fetch/scope-discovery context (oauth-integration.md's Scope discovery section).
-# Prompt context only - no ActivityItem/citation involvement, no tool accepts these
+# `id` is populated once discover_scope() upserts the ref into activity_items
+# (JIRA_PROJECT/JIRA_PERSON/GITHUB_REPO/GITHUB_USER - added once project/repo/person
+# pills became citable, see chat_system_prompt.md) - None only if the caller ran
+# discover_scope() without a session (no upsert happened, e.g. a context where
+# citations don't apply). Still prompt context primarily; no tool accepts these
 # directly as arguments except where noted.
 class JiraProjectRef(BaseModel):
+    id: UUID | None = None
     key: str
     name: str
 
@@ -97,20 +106,23 @@ class JiraPersonRef(BaseModel):
     discovered person, not just roster members.
     """
 
+    id: UUID | None = None
     account_id: str
     display_name: str
     email: str | None = None
 
 
 class GithubRepoRef(BaseModel):
+    id: UUID | None = None
     full_name: str
     description: str | None = None
 
 
 class GithubCollaboratorRef(BaseModel):
-    """Prompt context only - unlike JiraPersonRef, no tool needs a dedicated
-    "collaborator identifier" parameter, since GithubToolParams.github_login already
-    accepts any login directly, discovered or from the roster alike."""
+    """Unlike JiraPersonRef, no tool needs a dedicated "collaborator identifier"
+    parameter, since GithubToolParams.github_login already accepts any login
+    directly, discovered or from the roster alike."""
 
+    id: UUID | None = None
     login: str
     name: str | None = None

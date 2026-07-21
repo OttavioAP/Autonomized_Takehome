@@ -5,12 +5,24 @@
     {% elif kind == "jira_comment" %}
         {% set css_class = "jira" %}
         {% set prefix = "JIRA comment" %}
+    {% elif kind == "jira_project" %}
+        {% set css_class = "jira" %}
+        {% set prefix = "JIRA project" %}
+    {% elif kind == "jira_person" %}
+        {% set css_class = "jira" %}
+        {% set prefix = "JIRA person" %}
     {% elif kind == "github_pr" %}
         {% set css_class = "github" %}
         {% set prefix = "PR" %}
     {% elif kind == "github_comment" %}
         {% set css_class = "github" %}
         {% set prefix = "GitHub comment" %}
+    {% elif kind == "github_repo" %}
+        {% set css_class = "github" %}
+        {% set prefix = "Repo" %}
+    {% elif kind == "github_user" %}
+        {% set css_class = "github" %}
+        {% set prefix = "GitHub user" %}
     {% else %}
         {% set css_class = "github" %}
         {% set prefix = "Commit" %}

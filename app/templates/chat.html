@@ -115,9 +115,13 @@
             const meta = {
                 jira_ticket: ["jira", "JIRA"],
                 jira_comment: ["jira", "JIRA comment"],
+                jira_project: ["jira", "JIRA project"],
+                jira_person: ["jira", "JIRA person"],
                 github_commit: ["github", "Commit"],
                 github_pr: ["github", "PR"],
                 github_comment: ["github", "GitHub comment"],
+                github_repo: ["github", "Repo"],
+                github_user: ["github", "GitHub user"],
             }[item.kind] || ["github", ""];
             const text = (meta[1] ? meta[1] + ": " : "") + item.label;
             const a = document.createElement("a");

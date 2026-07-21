@@ -20,7 +20,7 @@ from app.config import get_settings
 from app.db.models.session import UserSession
 from app.db.models.team_member import TeamMember
 from app.db.session import db
-from app.integrations import github_client
+from app.integrations import github_client, jira_client
 from app.repositories import team_member_repo
 from app.services import token_store
 from app.templating import templates
@@ -156,10 +156,20 @@ async def jira_callback(
     cloud_id = resources[0]["id"]
     site_url = resources[0]["url"]
 
+    # team_members.jira_account_email is only a seed-time default, not an enforced
+    # identity - a team member can link any Atlassian account by connecting it (same
+    # model as GitHub's github_callback). Resolving and storing the real account_id
+    # here means pre_fetch.py/the chat roster look up the account that's actually
+    # connected, not a stale seeded email that may not even resolve to this account.
+    jira_http_client = jira_client.build_client(tokens["access_token"], cloud_id)
+    async with jira_http_client:
+        account_id = await jira_client.get_current_user_account_id(jira_http_client)
+
     await token_store.store_jira_tokens(
         team_member_id, tokens["access_token"], tokens["refresh_token"]
     )
     await team_member_repo.set_jira_cloud_id(db_session, team_member_id, cloud_id, site_url)
+    await team_member_repo.set_jira_account_id(db_session, team_member_id, account_id)
     await db_session.commit()
 
     response = RedirectResponse(url="/oauth/connect", status_code=status.HTTP_302_FOUND)
@@ -230,27 +240,24 @@ async def github_callback(
             detail=f"GitHub token exchange failed: {tokens.get('error', 'unknown error')}",
         )
 
-    # GitHub's consent screen silently reuses whichever GitHub account is already
-    # logged into the browser - there's no server-side way to force an account
-    # picker the way Azure AD's prompt=select_account does (see auth/oidc.py) - so a
-    # real, previously-hit failure mode is authorizing as the wrong GitHub account
-    # with no error anywhere in the flow. Catch it here: reject a mismatch outright
-    # rather than silently storing a token for the wrong person.
+    # team_members.github_login (from local-dev-data/team_members.json) is only a
+    # seed-time default, not an enforced identity - per oauth-integration.md, a team
+    # member can link *any* GitHub account by connecting it, the same way NMVP-FR-2's
+    # per-user OAuth model already lets anyone bring their own JIRA/GitHub credential.
+    # Whoever actually authorizes in the consent screen becomes this person's real
+    # linked identity going forward. Without updating github_login here, the roster
+    # rendered into the chat system prompt (ChatService._build_system_prompt) and
+    # pre_fetch.run() would keep calling get_github_activity with the stale seed
+    # login instead of the account whose token is actually stored - looking up the
+    # wrong person's activity on every subsequent turn, a real functional bug, not
+    # just a cosmetic one.
     github_http_client = github_client.build_client(tokens["access_token"])
     async with github_http_client:
         authenticated_login = await github_client.get_authenticated_login(github_http_client)
-    if authenticated_login.lower() != team_member.github_login.lower():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"You authorized GitHub as '{authenticated_login}', but "
-                f"{team_member.display_name} should connect as "
-                f"'{team_member.github_login}'. Sign out of GitHub in this browser "
-                "(or use a private/incognito window) and try Connect again."
-            ),
-        )
+    team_member.github_login = authenticated_login
 
     await token_store.store_github_token(team_member.id, tokens["access_token"])
+    await db_session.commit()
 
     response = RedirectResponse(url="/oauth/connect", status_code=status.HTTP_302_FOUND)
     response.delete_cookie(OAUTH_STATE_COOKIE_NAME)

@@ -24,8 +24,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.models.team_member import TeamMember
 from app.integrations import github_client, jira_client
-from app.repositories import conversation_repo
-from app.schemas.chat import GithubCollaboratorRef, GithubRepoRef, JiraPersonRef, JiraProjectRef
+from app.repositories import activity_item_repo, conversation_repo
+from app.schemas.chat import (
+    ActivityKind,
+    GithubCollaboratorRef,
+    GithubRepoRef,
+    JiraPersonRef,
+    JiraProjectRef,
+)
 from app.services import token_store
 from app.services.chat_errors import ToolExecutionError
 from app.services.tools.github_tool import GithubTool, GithubToolParams
@@ -47,6 +53,10 @@ class DiscoveredScope(BaseModel):
 async def discover_scope(
     jira_client_instance: httpx.AsyncClient | None,
     github_client_instance: httpx.AsyncClient | None,
+    *,
+    session: AsyncSession | None = None,
+    conversation_id: UUID | None = None,
+    jira_site_url: str | None = None,
 ) -> DiscoveredScope:
     """Runs JIRA/GitHub scope discovery independently per provider - either client may
     be None (provider not connected, or its own discovery call failed) without
@@ -54,9 +64,23 @@ async def discover_scope(
     most-recently-pushed repo (not fanned out across all discovered repos) - this is
     prompt-context-only data, so one extra call is a better tradeoff than
     discovery_top_n extra calls for a completeness gain the model rarely needs.
+
+    When session/conversation_id are given, each discovered project/person/repo/
+    collaborator is also upserted into activity_items (JIRA_PROJECT/JIRA_PERSON/
+    GITHUB_REPO/GITHUB_USER) via the same shared upsert() every other ActivityItem
+    goes through, and the returned refs carry a real `id` the model can cite -
+    matching chat.md's "the model cites, it does not construct" trust boundary
+    instead of leaving these as prompt-only text with no clickable link. jira_site_url
+    is required alongside session/conversation_id for the JIRA half, since a JIRA
+    project/person deep-link needs the real site host (jira_client's Bearer/cloud_id
+    client only knows the API host - the same cloud_id-vs-site_url distinction
+    JiraTool already has to account for). Omit all three to skip upserting entirely
+    (prompt-context-only refs with id=None) - e.g. a caller with no citation context.
     """
     settings = get_settings()
     scope = DiscoveredScope()
+    can_upsert_jira = session is not None and conversation_id is not None and jira_site_url
+    can_upsert_github = session is not None and conversation_id is not None
 
     if jira_client_instance is not None:
         try:
@@ -64,6 +88,19 @@ async def discover_scope(
             scope.jira_projects = [
                 JiraProjectRef(key=p.key, name=p.name) for p in projects[: settings.discovery_top_n]
             ]
+            if can_upsert_jira:
+                assert session is not None and conversation_id is not None and jira_site_url
+                for project in scope.jira_projects:
+                    row = await activity_item_repo.upsert(
+                        session,
+                        conversation_id=conversation_id,
+                        kind=ActivityKind.JIRA_PROJECT.value,
+                        external_id=project.key,
+                        label=f"{project.key}: {project.name}",
+                        url=f"{jira_site_url.rstrip('/')}/jira/software/projects/{project.key}/boards",
+                    )
+                    project.id = row.id
+
             if scope.jira_projects:
                 users = await jira_client.search_assignable_users(
                     jira_client_instance, scope.jira_projects[0].key
@@ -74,6 +111,18 @@ async def discover_scope(
                     )
                     for u in users[: settings.discovery_top_n]
                 ]
+                if can_upsert_jira:
+                    assert session is not None and conversation_id is not None and jira_site_url
+                    for person in scope.jira_people:
+                        row = await activity_item_repo.upsert(
+                            session,
+                            conversation_id=conversation_id,
+                            kind=ActivityKind.JIRA_PERSON.value,
+                            external_id=person.account_id,
+                            label=person.display_name,
+                            url=f"{jira_site_url.rstrip('/')}/jira/people/{person.account_id}",
+                        )
+                        person.id = row.id
         except httpx.HTTPError:
             # Best-effort discovery (same reasoning as the activity pre-fetch below) -
             # covers both a real error status and connection-level unreachability.
@@ -87,6 +136,19 @@ async def discover_scope(
             scope.github_repos = [
                 GithubRepoRef(full_name=r.full_name, description=r.description) for r in repos
             ]
+            if can_upsert_github:
+                assert session is not None and conversation_id is not None
+                for repo in scope.github_repos:
+                    row = await activity_item_repo.upsert(
+                        session,
+                        conversation_id=conversation_id,
+                        kind=ActivityKind.GITHUB_REPO.value,
+                        external_id=repo.full_name,
+                        label=repo.full_name,
+                        url=f"https://github.com/{repo.full_name}",
+                    )
+                    repo.id = row.id
+
             if scope.github_repos:
                 contributors = await github_client.get_repo_contributors(
                     github_client_instance,
@@ -96,6 +158,18 @@ async def discover_scope(
                 scope.github_collaborators = [
                     GithubCollaboratorRef(login=c.login) for c in contributors
                 ]
+                if can_upsert_github:
+                    assert session is not None and conversation_id is not None
+                    for collaborator in scope.github_collaborators:
+                        row = await activity_item_repo.upsert(
+                            session,
+                            conversation_id=conversation_id,
+                            kind=ActivityKind.GITHUB_USER.value,
+                            external_id=collaborator.login,
+                            label=collaborator.login,
+                            url=f"https://github.com/{collaborator.login}",
+                        )
+                        collaborator.id = row.id
         except httpx.HTTPError:
             pass
 
@@ -124,18 +198,34 @@ async def run(
             jira_tokens.access_token, team_member.jira_cloud_id
         )
         async with jira_http_client:
-            discovered = await discover_scope(jira_http_client, None)
+            discovered = await discover_scope(
+                jira_http_client,
+                None,
+                session=session,
+                conversation_id=conversation_id,
+                jira_site_url=team_member.jira_site_url,
+            )
             scope.jira_projects = discovered.jira_projects
             scope.jira_people = discovered.jira_people
 
         if scope.jira_projects:
+            # jira_account_id (resolved at connect time - see app/api/oauth.py's
+            # jira_callback) is preferred once set: it's the account that actually
+            # authorized, which may not be the one jira_account_email (a seed-time
+            # default) points at. Falls back to email for a user who hasn't
+            # reconnected since this field was introduced.
+            identity_kwargs = (
+                {"account_id": team_member.jira_account_id}
+                if team_member.jira_account_id
+                else {"jira_account_email": team_member.jira_account_email}
+            )
             try:
                 await JiraTool().execute(
                     session,
                     conversation_id,
                     JiraToolParams(
-                        jira_account_email=team_member.jira_account_email,
                         project_key=scope.jira_projects[0].key,
+                        **identity_kwargs,
                     ),
                     team_member_id=str(team_member.id),
                     access_token=jira_tokens.access_token,
@@ -152,7 +242,9 @@ async def run(
     if github_token is not None:
         github_http_client = github_client.build_client(github_token)
         async with github_http_client:
-            discovered = await discover_scope(None, github_http_client)
+            discovered = await discover_scope(
+                None, github_http_client, session=session, conversation_id=conversation_id
+            )
             scope.github_repos = discovered.github_repos
             scope.github_collaborators = discovered.github_collaborators
 

@@ -92,6 +92,21 @@ async def find_account_id_by_email(client: httpx.AsyncClient, email: str) -> str
     return results[0]["accountId"] if results else None
 
 
+async def get_current_user_account_id(client: httpx.AsyncClient) -> str:
+    """The account_id the given Bearer token actually authenticates as - resolved via
+    /rest/api/3/myself, the same real endpoint utils/jira_seed_data.py already calls
+    (over Basic auth) to resolve each demo account's accountId. Used at connect time
+    so team_members.jira_account_id reflects whichever Atlassian account actually
+    authorized, not whatever email was seeded - per oauth-integration.md, a team
+    member can link any Atlassian account by connecting it, the same way GitHub's
+    connect flow works.
+    """
+    resp = await client.get("/rest/api/3/myself")
+    resp.raise_for_status()
+    account_id: str = resp.json()["accountId"]
+    return account_id
+
+
 def _extract_plain_text(adf_body: dict[str, Any]) -> str:
     """Best-effort plain-text extraction from Atlassian Document Format - walks
     content nodes, joining text leaves with the block structure collapsed. ADF is a

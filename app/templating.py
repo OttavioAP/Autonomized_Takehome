@@ -11,9 +11,13 @@ _CITE_SENTINEL_RE = re.compile(r"\{\{cite:(\d+):([0-9a-fA-F-]{36})\}\}")
 _ACTIVITY_KIND_META = {
     "jira_ticket": {"css_class": "jira", "prefix": "JIRA"},
     "jira_comment": {"css_class": "jira", "prefix": "JIRA comment"},
+    "jira_project": {"css_class": "jira", "prefix": "JIRA project"},
+    "jira_person": {"css_class": "jira", "prefix": "JIRA person"},
     "github_commit": {"css_class": "github", "prefix": "Commit"},
     "github_pr": {"css_class": "github", "prefix": "PR"},
     "github_comment": {"css_class": "github", "prefix": "GitHub comment"},
+    "github_repo": {"css_class": "github", "prefix": "Repo"},
+    "github_user": {"css_class": "github", "prefix": "GitHub user"},
 }
 
 _UNRESOLVED_CITATION_DETAIL = "Couldn't resolve a citation the assistant made — this may be a bug."

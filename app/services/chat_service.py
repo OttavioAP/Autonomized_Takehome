@@ -425,7 +425,18 @@ class ChatService:
         try:
             # discover_scope() swallows per-provider HTTPStatusError itself (best-effort,
             # same posture as pre_fetch.run) - this just owns closing the clients it built.
-            return await discover_scope(jira_http_client, github_http_client)
+            # session/conversation_id/jira_site_url upsert each discovered project/
+            # person/repo/collaborator into activity_items so the model can cite them
+            # (JIRA_PROJECT/JIRA_PERSON/GITHUB_REPO/GITHUB_USER) - safe to re-run every
+            # turn since upsert() is a real ON CONFLICT DO UPDATE, same as every other
+            # tool call already does.
+            return await discover_scope(
+                jira_http_client,
+                github_http_client,
+                session=self._session,
+                conversation_id=self._conversation_id,
+                jira_site_url=credentials.jira_site_url,
+            )
         finally:
             if jira_http_client is not None:
                 await jira_http_client.aclose()
@@ -439,26 +450,56 @@ class ChatService:
         own_activity_rows: list[ActivityItemModel],
         scope: DiscoveredScope,
     ) -> str:
-        roster = "\n".join(
-            f"- {tm.display_name} (jira: {tm.jira_account_email}, github: {tm.github_login})"
-            for tm in team_members
-        )
+        def _roster_line(tm: TeamMember) -> str:
+            # jira_account_id (real, resolved at connect time) is preferred over
+            # jira_account_email (a seed-time default that may not match whichever
+            # Atlassian account the person actually connected - any account can be
+            # linked, per oauth-integration.md) whenever it's known. The label tells
+            # the model which get_jira_tickets kwarg to use, matching the Tools
+            # section's jira_account_email OR account_id contract.
+            jira_bit = (
+                f"jira account_id: {tm.jira_account_id}"
+                if tm.jira_account_id
+                else f"jira: {tm.jira_account_email}"
+            )
+            return f"- {tm.display_name} ({jira_bit}, github: {tm.github_login})"
+
+        roster = "\n".join(_roster_line(tm) for tm in team_members)
         own_activity = (
             "\n".join(f"- {row.kind} {row.label} (id={row.id})" for row in own_activity_rows)
             or "(none found)"
         )
+        # id=... makes each project/person/repo/collaborator citable, same pattern as
+        # own_activity above (chat_system_prompt.md's citation rule now covers these
+        # too) - upsert() in discover_scope() always sets it on a successful run;
+        # omitted only in the (should-not-happen) case a ref's upsert didn't complete.
         jira_projects = (
-            "\n".join(f"- {p.key}: {p.name}" for p in scope.jira_projects) or "(none discovered)"
+            "\n".join(
+                f"- {p.key}: {p.name}" + (f" (id={p.id})" if p.id else "")
+                for p in scope.jira_projects
+            )
+            or "(none discovered)"
         )
         jira_people = (
-            "\n".join(f"- {p.display_name} (account_id={p.account_id})" for p in scope.jira_people)
+            "\n".join(
+                f"- {p.display_name} (account_id={p.account_id})"
+                + (f" (id={p.id})" if p.id else "")
+                for p in scope.jira_people
+            )
             or "(none discovered)"
         )
         github_repos = (
-            "\n".join(f"- {r.full_name}" for r in scope.github_repos) or "(none discovered)"
+            "\n".join(
+                f"- {r.full_name}" + (f" (id={r.id})" if r.id else "") for r in scope.github_repos
+            )
+            or "(none discovered)"
         )
         github_collaborators = (
-            "\n".join(f"- {c.login}" for c in scope.github_collaborators) or "(none discovered)"
+            "\n".join(
+                f"- {c.login}" + (f" (id={c.id})" if c.id else "")
+                for c in scope.github_collaborators
+            )
+            or "(none discovered)"
         )
         template = load_prompt("chat_system_prompt.md")
         return (

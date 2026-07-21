@@ -33,3 +33,18 @@ async def set_jira_cloud_id(
         raise ValueError(f"No team_members row for id={team_member_id}")
     team_member.jira_cloud_id = cloud_id
     team_member.jira_site_url = site_url
+
+
+async def set_jira_account_id(
+    session: AsyncSession, team_member_id: uuid.UUID, account_id: str
+) -> None:
+    """Called once from GET /oauth/jira/callback after resolving the connecting
+    account's real account_id via /rest/api/3/myself - not a secret, safe to keep in
+    Postgres. Supersedes jira_account_email as the identifier pre_fetch.py/the chat
+    roster use once set, since a team member can connect any Atlassian account (not
+    necessarily the one the seed email points at). Caller commits.
+    """
+    team_member = await session.get(TeamMember, team_member_id)
+    if team_member is None:
+        raise ValueError(f"No team_members row for id={team_member_id}")
+    team_member.jira_account_id = account_id
