@@ -17,6 +17,10 @@ dependencies = [
     "python-jose[cryptography]>=3.3",
     "azure-keyvault-secrets>=4.8",
     "azure-identity>=1.17",
+    # Server-side markdown rendering for history replay (resolve_citations), matching
+    # the client-side marked.js rendering of the same content while it streams live -
+    # the model's own output is markdown (unprompted but consistent).
+    "markdown>=3.7",
     # azure-core's async pipeline transport lazily imports aiohttp at runtime and doesn't
     # declare it as a hard dependency - required for azure-identity's aio credentials to work.
     "aiohttp>=3.9",

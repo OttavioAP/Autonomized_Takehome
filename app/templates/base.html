@@ -11,6 +11,8 @@
         {% endblock extra_head %}
         <script src="{{ url_for('static', path='vendor/htmx.min.js') }}" defer></script>
         <script src="{{ url_for('static', path='vendor/htmx-ext-sse.js') }}" defer></script>
+        {% block extra_scripts %}
+        {% endblock extra_scripts %}
     </head>
     <body>
         {% block navbar %}
