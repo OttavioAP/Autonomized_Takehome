@@ -2,6 +2,77 @@
 
 Most recent entry at the top. One entry per meaningful change — new/updated requirements, architecture decisions, or implementation milestones.
 
+## 2026-07-21 (MVP fully complete: UI/UX pass, error handling, real identity linking, richer seed data, markdown rendering)
+
+One consolidated entry for a long session's worth of commits (dozens of pushes,
+all individually green in CI) rather than one entry per commit. `features.md`/
+`timeline.md` both updated to reflect the actual final state — every MVP-tier
+row across all five status columns (Specced/Implemented/Tested/Deployed/QA) is
+now ✅, with Build Phases 6-8 and timeline steps 9-13 all marked complete.
+
+- **UI/UX pass** (NMVP-FR-7, largely done): full dark "console" theme applied
+  app-wide (login, oauth-connect, chat), navbar + collapsible sidebar
+  replacing the old bare `<details>` dropdown, send-to-first-token throbber,
+  hover/clickable pill styling, and a fix for the chat/oauth-connect pages
+  running taller/wider than the viewport at non-reference screen sizes (a
+  flex-based layout fix, not a hardcoded viewport calc).
+- **Concurrent tool-calling**: `ChatService`'s same-round tool calls now run
+  via `asyncio.gather`, each against its own DB session (`AsyncSession` isn't
+  safe for concurrent use) - surfaced and fixed a real TOCTOU race in
+  `activity_item_repo.upsert`'s check-then-insert pattern, fixed with a real
+  atomic `INSERT ... ON CONFLICT DO UPDATE`.
+- **Error/empty states** (MVP-FR-6): scoped with the user to real
+  upstream-failure states specifically. Found `UpstreamProviderError` was
+  defined but never raised, and every upstream call site only caught
+  `httpx.HTTPStatusError`, not connection-level failures - an unreachable
+  OpenRouter/JIRA/GitHub would have crashed the SSE stream instead of
+  degrading gracefully. Fixed across all three legs, with live-forced tests
+  (real unreachable-host connections, no mocks) and a real bordered/iconed
+  `.chat-error` banner instead of bare red text.
+- **Real OAuth identity linking**: found and corrected a wrong fix mid-session
+  - initially rejected a GitHub connect whose account didn't match the seeded
+  `github_login`, which was actually incorrect per `oauth-integration.md`'s
+  design (any account can be linked). Corrected to update
+  `team_members.github_login`/new `jira_account_id` to whichever account
+  actually authorizes. Also found GitHub's OAuth authorize endpoint does
+  support `prompt=select_account` (same as Azure AD, already in use) after
+  initially believing it didn't - added to stop the browser from silently
+  reusing whichever GitHub account was already logged in.
+- **9 citable `ActivityKind`s** (up from 3 originally, 5 before this session):
+  added `jira_project`/`jira_person`/`github_repo`/`github_user` as real
+  citable pills (previously plain unlinked text) after live user testing
+  found the gap - `discover_scope()` now upserts each discovered
+  project/person/repo/collaborator into `activity_items` with a real,
+  live-verified deep-link URL, through the same citation trust boundary as
+  every other kind.
+- **Markdown rendering** (a real bug: `**bold**`/`- lists` showed as literal
+  syntax, never parsed): fixed on both the live path (`marked.js`, vendored)
+  and history replay (`resolve_citations`, new Python-Markdown dependency),
+  both escaping the model's own text before parsing to prevent HTML
+  injection, with citation pills spliced in via placeholder tokens so they're
+  never subject to markdown syntax interpretation. 8 new unit tests
+  (`tests/test_templating.py`), including an explicit XSS-safety case.
+- **Richer seed data** (MVP-NFR-7): expanded from the original thin first pass
+  to 3 real JIRA projects (`KAN`/`MOB`/`DATA`, 23+ issues, comment threads)
+  and 3 real GitHub repos (`Autonomized_Test_Project_1`/
+  `mobile-companion-app`/`analytics-pipeline`, commits/PRs/reviews/comments)
+  across all 3 demo accounts, via real, idempotent, re-runnable seed scripts
+  - no fixtures or mocks.
+- **README** (MVP-NFR-10): genuinely nothing existed before this session (a
+  2-line placeholder). Added real setup instructions and one section each for
+  JIRA/GitHub/OpenRouter/Azure AD SSO/Azure Key Vault.
+- **System prompt fixes**: the model was under-using tools (answering from
+  thin pre-fetched context) and leaking its own internal process into answers
+  ("based on the pre-fetched data...") - fixed with a hard "always call a tool
+  first" rule and removing every "pre-fetched"/tool-referencing phrase from
+  the prompt's own vocabulary. Also fixed a missing separator between a
+  tool-call round's leading text and the next round's answer.
+- **Prod fixes found via live use**: sign-out wasn't actually signing out of
+  Azure AD's own browser SSO session (fixed via `prompt=select_account`);
+  added `scripts/purge_conversations.py` for safe per-user conversation
+  cleanup (dry-run by default, deletes in real FK-dependency order since
+  none of the chat schema's FKs cascade).
+
 ## 2026-07-20 (Fix: production 500 on login - AZURE_CLIENT_ID hijacking Managed Identity resolution)
 
 - Second real production incident found via live testing (after the seed fix above unblocked login): every authenticated request hit a plain Internal Server Error. Root cause via App Service log download: `token_store._credential()`'s `DefaultAzureCredential` defaults `managed_identity_client_id` to `os.environ["AZURE_CLIENT_ID"]` when that kwarg isn't passed - and this app's `AZURE_CLIENT_ID` setting is the unrelated Azure AD SSO app registration's client id, not a real user-assigned managed identity. `ManagedIdentityCredential` searched for a user-assigned identity matching that id, found none, and raised - even though the correct system-assigned identity was provisioned and role-assigned the whole time (confirmed via `az webapp identity show`). Fixed by passing `managed_identity_client_id=None` explicitly, which suppresses the env-var fallback and forces system-assigned resolution.
