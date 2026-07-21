@@ -1,5 +1,24 @@
 {% extends "base.html" %}
 {% block title %}Connect your accounts{% endblock title %}
+{% block navbar %}
+    <nav class="app-navbar">
+        <ul>
+            <li><strong>Team Activity Monitor</strong></li>
+        </ul>
+        <ul>
+            <li>{{ current_user.user_display_name }}</li>
+            <li>
+                <a href="{{ url_for('index') }}" role="button" class="secondary">Back to chat</a>
+            </li>
+            <li>
+                <form method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ current_user.csrf_token }}" />
+                    <button type="submit" class="secondary">Sign out</button>
+                </form>
+            </li>
+        </ul>
+    </nav>
+{% endblock navbar %}
 {% block content %}
     <div class="auth-shell">
         <div class="auth-card">
